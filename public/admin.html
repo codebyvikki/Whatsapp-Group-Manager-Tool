@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin · Group Link Organizer</title>
+<style>
+:root{
+  --bg:#f6f8f7;--card:#fff;--surface:#f8faf9;--ink:#17221c;
+  --muted:#66736b;--line:#dfe7e2;--brand:#128c55;--brand-dark:#0b7144;
+  --brand-soft:#e8f6ef;--danger:#b42318;--danger-soft:#fff1f0;
+  --shadow:0 8px 28px rgba(18,40,28,.07);--radius:14px
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{width:min(1050px,calc(100% - 28px));margin:28px auto 50px}
+header{display:flex;justify-content:space-between;align-items:center;gap:18px;margin-bottom:18px}
+.brand{display:flex;align-items:center;gap:13px}
+.logo{width:44px;height:44px;border-radius:12px;background:var(--brand);color:#fff;display:grid;place-items:center;font-weight:800;box-shadow:0 6px 18px rgba(18,140,85,.22)}
+h1{font-size:1.35rem;margin:0}
+.subtitle{margin:3px 0 0;color:var(--muted);font-size:.86rem}
+.top-actions{display:flex;gap:8px;align-items:center}
+button,a{font:inherit}
+button{border:1px solid transparent;min-height:40px;padding:9px 13px;border-radius:10px;cursor:pointer;font-weight:700;background:var(--brand);color:#fff}
+button:hover{background:var(--brand-dark)}
+button:disabled{opacity:.55;cursor:not-allowed}
+.ghost{background:var(--surface);color:var(--ink);border-color:var(--line);text-decoration:none}
+.ghost:hover{background:var(--card)}
+.danger{background:var(--danger-soft);border-color:#f3c5c0;color:var(--danger)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:20px;box-shadow:var(--shadow);margin-bottom:16px}
+.grid{display:grid;grid-template-columns:330px 1fr;gap:16px}
+h2{font-size:1rem;margin:0 0 4px}
+.desc{color:var(--muted);font-size:.84rem;margin:0 0 16px}
+label{display:grid;gap:7px;color:var(--muted);font-size:.82rem;font-weight:700;margin-bottom:12px}
+input{width:100%;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);padding:11px 12px;outline:none}
+input:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(18,140,85,.1);background:var(--card)}
+.form-actions{display:flex;gap:8px;justify-content:flex-end}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:13px}
+.stat b{font-size:1.15rem}.stat span{display:block;color:var(--muted);font-size:.74rem;margin-top:3px}
+.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:12px}
+table{width:100%;border-collapse:collapse;min-width:620px}
+th,td{text-align:left;padding:12px;border-bottom:1px solid var(--line);font-size:.82rem}
+th{background:var(--surface);color:var(--muted);font-size:.74rem;text-transform:uppercase;letter-spacing:.04em}
+tr:last-child td{border-bottom:0}
+.badge{display:inline-flex;align-items:center;border-radius:999px;padding:5px 8px;font-size:.72rem;font-weight:800}
+.badge.on{background:var(--brand-soft);color:var(--brand)}
+.badge.off{background:var(--danger-soft);color:var(--danger)}
+.actions{display:flex;gap:6px;flex-wrap:wrap}
+.small{min-height:34px;padding:7px 9px;font-size:.74rem}
+.notice{padding:10px 12px;border-radius:10px;background:var(--surface);border:1px solid var(--line);color:var(--muted);font-size:.8rem;margin-bottom:12px}
+.error{color:var(--danger);font-size:.8rem;min-height:18px;margin-top:8px}
+.hidden{display:none!important}
+.login{max-width:430px;margin:80px auto}
+.login .icon{font-size:2rem;margin-bottom:8px}
+@media(max-width:800px){.grid{grid-template-columns:1fr}.stats{grid-template-columns:1fr 1fr}header{align-items:flex-start}.top-actions{flex-wrap:wrap;justify-content:flex-end}}
+@media(max-width:520px){main{width:min(100% - 18px,1050px);margin-top:16px}.card{padding:16px}.stats{grid-template-columns:1fr}header{flex-direction:column}.top-actions{width:100%;justify-content:flex-start}}
+</style>
+</head>
+<body>
+<main>
+
+  <div id="loginView" class="login card">
+    <div class="icon">⚙</div>
+    <h1>Admin Control Center</h1>
+    <p class="desc">Manage user access without exposing WhatsApp controls to normal users.</p>
+
+    <label>Username
+      <input id="loginUser" autocomplete="username" placeholder="Admin username">
+    </label>
+    <label>Password
+      <input id="loginPass" type="password" autocomplete="current-password" placeholder="Admin password">
+    </label>
+    <button id="loginBtn" style="width:100%">Sign In</button>
+    <div id="loginError" class="error"></div>
+  </div>
+
+  <div id="appView" class="hidden">
+    <header>
+      <div class="brand">
+        <div class="logo">GL</div>
+        <div>
+          <h1>Admin Control Center</h1>
+          <p class="subtitle">User access, account security and workspace management</p>
+        </div>
+      </div>
+      <div class="top-actions">
+        <a class="ghost" href="/" style="padding:9px 13px;border:1px solid var(--line);border-radius:10px">Open App</a>
+        <button class="ghost" id="logoutBtn">Sign Out</button>
+      </div>
+    </header>
+
+    <div class="grid">
+      <section class="card">
+        <h2>Create User</h2>
+        <p class="desc">Give a user their own login. Their saved lists and jobs stay isolated from every other account.</p>
+
+        <label>Username
+          <input id="newUser" autocomplete="off" maxlength="32" placeholder="e.g. rahul01">
+        </label>
+
+        <label>Password
+          <input id="newPass" type="password" autocomplete="new-password" maxlength="128" placeholder="Minimum 8 characters">
+        </label>
+
+        <div class="form-actions">
+          <button id="createBtn">Create User</button>
+        </div>
+        <div id="createError" class="error"></div>
+      </section>
+
+      <section class="card">
+        <h2>Users</h2>
+        <p class="desc">Disable an account to immediately revoke its active sessions. Resetting a password also signs that user out everywhere.</p>
+
+        <div class="stats">
+          <div class="stat"><b id="totalUsers">0</b><span>Total users</span></div>
+          <div class="stat"><b id="activeUsers">0</b><span>Enabled</span></div>
+          <div class="stat"><b id="disabledUsers">0</b><span>Disabled</span></div>
+        </div>
+
+        <div id="tableNotice" class="notice">Loading users…</div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Username</th><th>Status</th><th>Created</th><th>Actions</th></tr>
+            </thead>
+            <tbody id="usersBody"></tbody>
+          </table>
+        </div>
+        <div id="usersError" class="error"></div>
+      </section>
+    </div>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+
+async function request(url, options = {}) {
+  const r = await fetch(url, {
+    credentials: 'same-origin',
+    ...options,
+    headers: {
+      ...(options.body ? {'Content-Type':'application/json'} : {}),
+      ...(options.headers || {})
+    }
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw Object.assign(new Error(j.error || 'Request failed'), {status:r.status});
+  return j;
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+}
+
+function formatDate(value) {
+  if (!value) return '—';
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString(undefined, {year:'numeric',month:'short',day:'numeric'});
+}
+
+let users = [];
+
+async function checkAdmin() {
+  try {
+    const me = await request('/api/me');
+    if (me.loggedIn && me.user.role === 'admin') {
+      $('loginView').classList.add('hidden');
+      $('appView').classList.remove('hidden');
+      await loadUsers();
+    } else {
+      $('loginView').classList.remove('hidden');
+      $('appView').classList.add('hidden');
+    }
+  } catch {
+    $('loginView').classList.remove('hidden');
+    $('appView').classList.add('hidden');
+  }
+}
+
+async function loadUsers() {
+  $('tableNotice').textContent = 'Loading users…';
+  try {
+    users = (await request('/api/admin/users')).users;
+    renderUsers();
+  } catch (e) {
+    if (e.status === 401 || e.status === 403) return checkAdmin();
+    $('usersError').textContent = e.message;
+  }
+}
+
+function renderUsers() {
+  const enabled = users.filter(u => u.enabled).length;
+  $('totalUsers').textContent = users.length;
+  $('activeUsers').textContent = enabled;
+  $('disabledUsers').textContent = users.length - enabled;
+
+  $('tableNotice').textContent = users.length
+    ? 'Each account has independent saved lists and job access.'
+    : 'No normal users have been created yet.';
+
+  $('usersBody').innerHTML = users.map(u => `
+    <tr>
+      <td><strong>${esc(u.username)}</strong></td>
+      <td><span class="badge ${u.enabled ? 'on' : 'off'}">${u.enabled ? 'Enabled' : 'Disabled'}</span></td>
+      <td>${esc(formatDate(u.createdAt))}</td>
+      <td>
+        <div class="actions">
+          <button class="small ghost" data-action="toggle" data-id="${esc(u.id)}">${u.enabled ? 'Disable' : 'Enable'}</button>
+          <button class="small ghost" data-action="reset" data-id="${esc(u.id)}">Reset Password</button>
+          <button class="small danger" data-action="delete" data-id="${esc(u.id)}">Delete</button>
+        </div>
+      </td>
+    </tr>
+  `).join('');
+}
+
+$('loginBtn').onclick = async () => {
+  $('loginError').textContent = '';
+  $('loginBtn').disabled = true;
+  try {
+    await request('/api/login', {
+      method:'POST',
+      body:JSON.stringify({user:$('loginUser').value, pass:$('loginPass').value})
+    });
+    await checkAdmin();
+  } catch(e) {
+    $('loginError').textContent = e.message;
+  } finally {
+    $('loginBtn').disabled = false;
+  }
+};
+
+$('loginPass').addEventListener('keydown', e => {
+  if (e.key === 'Enter') $('loginBtn').click();
+});
+
+$('createBtn').onclick = async () => {
+  $('createError').textContent = '';
+  const username = $('newUser').value.trim();
+  const password = $('newPass').value;
+
+  $('createBtn').disabled = true;
+  try {
+    await request('/api/admin/users', {
+      method:'POST',
+      body:JSON.stringify({username,password})
+    });
+    $('newUser').value = '';
+    $('newPass').value = '';
+    await loadUsers();
+  } catch(e) {
+    $('createError').textContent = e.message;
+  } finally {
+    $('createBtn').disabled = false;
+  }
+};
+
+$('usersBody').onclick = async e => {
+  const btn = e.target.closest('button[data-action]');
+  if (!btn) return;
+
+  const id = btn.dataset.id;
+  const user = users.find(u => u.id === id);
+  if (!user) return;
+
+  try {
+    if (btn.dataset.action === 'toggle') {
+      await request('/api/admin/users/' + encodeURIComponent(id), {
+        method:'PATCH',
+        body:JSON.stringify({enabled:!user.enabled})
+      });
+    }
+
+    if (btn.dataset.action === 'reset') {
+      const password = prompt('Enter a new password (minimum 8 characters):');
+      if (password === null) return;
+      await request('/api/admin/users/' + encodeURIComponent(id) + '/reset-password', {
+        method:'POST',
+        body:JSON.stringify({password})
+      });
+      alert('Password reset successfully. The user has been signed out.');
+    }
+
+    if (btn.dataset.action === 'delete') {
+      if (!confirm('Delete "' + user.username + '"? Their saved lists will also be deleted.')) return;
+      await request('/api/admin/users/' + encodeURIComponent(id), {method:'DELETE'});
+    }
+
+    await loadUsers();
+  } catch(e) {
+    $('usersError').textContent = e.message;
+  }
+};
+
+$('logoutBtn').onclick = async () => {
+  try { await request('/api/logout', {method:'POST'}); } catch {}
+  location.reload();
+};
+
+checkAdmin();
+</script>
+</body>
+</html>
