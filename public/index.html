@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Group Link Organizer</title>
+<style>
+  :root { --bg:#f3f5f2; --card:#fff; --ink:#16211b; --mute:#66756c; --brand:#128c55; --line:#dfe6e0; --err:#b3261e; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0f1512; --card:#18211c; --ink:#e7efe9; --mute:#93a399; --brand:#3ecf8e; --line:#28352d; --err:#ff8a80; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.5 system-ui, "Noto Sans", sans-serif; padding:16px; }
+  main { max-width:560px; margin:0 auto; display:grid; gap:14px; }
+  h1 { font-size:1.35rem; margin:8px 0 0; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; display:grid; gap:10px; }
+  label { font-size:.9rem; color:var(--mute); display:grid; gap:4px; }
+  input, textarea { font:inherit; color:inherit; background:transparent; border:1px solid var(--line); border-radius:8px; padding:10px; width:100%; }
+  textarea { min-height:280px; resize:vertical; }
+  .row { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  button { font:inherit; font-weight:600; border:0; border-radius:8px; padding:11px 14px; background:var(--brand); color:#fff; cursor:pointer; }
+  button.ghost { background:transparent; color:var(--ink); border:1px solid var(--line); }
+  button:disabled { opacity:.6; }
+  :focus-visible { outline:2px solid var(--brand); outline-offset:2px; }
+  .err { color:var(--err); font-size:.9rem; }
+  .mute { color:var(--mute); font-size:.9rem; }
+  .qr { display:grid; justify-items:center; gap:8px; }
+  .qr img { width:260px; max-width:100%; border-radius:8px; background:#fff; }
+  .miss { font-size:.88rem; color:var(--err); }
+  [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Group Link Organizer</h1>
+
+  <section id="login" hidden>
+    <label>Username <input id="u" autocomplete="username"></label>
+    <label>Password <input id="p" type="password" autocomplete="current-password"></label>
+    <button id="loginBtn">Login</button>
+    <div class="err" id="loginErr"></div>
+  </section>
+
+  <section id="connect" hidden>
+    <div id="connMsg" class="mute">Check ho raha hai…</div>
+    <div class="qr" id="qrBox" hidden>
+      <img id="qrImg" alt="WhatsApp QR code">
+      <div class="mute">WhatsApp → Linked devices → Link a device → QR scan karo</div>
+    </div>
+  </section>
+
+  <section id="tool" hidden>
+    <label>Group name ka prefix <input id="prefix" value="Booking 限时推广BF"></label>
+    <div class="row">
+      <label>Se (number) <input id="from" type="number" value="21"></label>
+      <label>Tak (number) <input id="to" type="number" value="40"></label>
+    </div>
+    <button id="go">Links nikalo</button>
+    <div class="mute" id="progress"></div>
+    <div class="err" id="err"></div>
+  </section>
+
+  <section id="out" hidden>
+    <textarea id="text" readonly></textarea>
+    <div class="miss" id="missing"></div>
+    <button id="copy">Copy All</button>
+    <button class="ghost" id="unlink">WhatsApp disconnect karo</button>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const api = async (url, body) => {
+  const r = await fetch(url, body ? { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) } : {});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw Object.assign(new Error(j.error || 'Error'), { status:r.status });
+  return j;
+};
+
+async function boot() {
+  const me = await api('/api/me');
+  if (!me.loggedIn) { $('login').hidden = false; $('connect').hidden = true; $('tool').hidden = true; return; }
+  $('login').hidden = true; $('connect').hidden = false;
+  poll();
+}
+
+async function poll() {
+  try {
+    const s = await api('/api/status');
+    const ok = s.state === 'connected';
+    $('tool').hidden = !ok;
+    $('qrBox').hidden = s.state !== 'qr';
+    if (s.qr) $('qrImg').src = s.qr;
+    $('connMsg').textContent = ok ? 'WhatsApp connected ✔' :
+      s.state === 'qr' ? 'QR scan karke connect karo' : 'WhatsApp start ho raha hai…';
+  } catch (e) { if (e.status === 401) return boot(); }
+  setTimeout(poll, 3000);
+}
+
+$('loginBtn').onclick = async () => {
+  $('loginErr').textContent = '';
+  try { await api('/api/login', { user:$('u').value, pass:$('p').value }); boot(); }
+  catch (e) { $('loginErr').textContent = e.message; }
+};
+
+$('go').onclick = async () => {
+  $('err').textContent = ''; $('out').hidden = true;
+  $('go').disabled = true; $('progress').textContent = 'Links nikal rahe hain… thoda time lagega (har group ke beech gap hai).';
+  try {
+    const r = await api('/api/links', { prefix:$('prefix').value, from:$('from').value, to:$('to').value });
+    $('text').value = r.text;
+    const miss = r.results.filter(x => !x.link).map(x => `${x.name}: ${x.note}`);
+    $('missing').textContent = miss.length ? 'Nahi mile:\n' + miss.join('\n') : '';
+    $('missing').style.whiteSpace = 'pre-line';
+    $('out').hidden = false;
+    $('progress').textContent = `${r.results.length - miss.length} links mile.`;
+  } catch (e) { $('err').textContent = e.message; $('progress').textContent = ''; }
+  $('go').disabled = false;
+};
+
+$('copy').onclick = async () => {
+  try { await navigator.clipboard.writeText($('text').value); }
+  catch { $('text').select(); document.execCommand('copy'); }
+  $('copy').textContent = 'Copied'; setTimeout(() => $('copy').textContent = 'Copy All', 1500);
+};
+
+$('unlink').onclick = async () => { await api('/api/logout-wa', {}); $('out').hidden = true; };
+
+boot();
+</script>
+</body>
+</html>
