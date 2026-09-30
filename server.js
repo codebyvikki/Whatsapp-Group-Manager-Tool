@@ -13,6 +13,13 @@ const PANEL_USER = process.env.PANEL_USER || 'admin';
 const PANEL_PASS = process.env.PANEL_PASS || 'change-me';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+let groupCache = { at: 0, data: null };
+async function getGroups() {
+  if (groupCache.data && Date.now() - groupCache.at < 5 * 60 * 1000) return groupCache.data;
+  groupCache = { at: Date.now(), data: await sock.groupFetchAllParticipating() };
+  return groupCache.data;
+}
+
 /* ---------- WhatsApp connection ---------- */
 let sock = null;
 let state = 'starting'; // starting | qr | connected | closed
@@ -87,7 +94,7 @@ app.post('/api/links', authed, async (req, res) => {
     return res.status(400).json({ error: 'Prefix aur number range sahi daalo' });
 
   try {
-    const all = await sock.groupFetchAllParticipating();
+    const all = await getGroups();
     const wanted = new Map(); // number -> {id, name}
     for (const g of Object.values(all)) {
       const name = (g.subject || '').trim();
@@ -98,17 +105,25 @@ app.post('/api/links', authed, async (req, res) => {
       if (n >= a && n <= b) wanted.set(n, { id: g.id, name });
     }
 
+    const nums = [];
+    for (let n = a; n <= b; n++) nums.push(n);
     const results = [];
-    for (let n = a; n <= b; n++) {
-      const g = wanted.get(n);
-      if (!g) { results.push({ n, name: `${prefix.trim()}${n}`, link: null, note: 'group nahi mila' }); continue; }
-      try {
-        const code = await sock.groupInviteCode(g.id);
-        results.push({ n, name: g.name, link: `https://chat.whatsapp.com/${code}` });
-      } catch {
-        results.push({ n, name: g.name, link: null, note: 'link nahi mila (admin nahi ho)' });
-      }
-      await sleep(1500); // ban se bachne ke liye gap
+    const BATCH = 5;
+    for (let i = 0; i < nums.length; i += BATCH) {
+      const part = await Promise.all(
+        nums.slice(i, i + BATCH).map(async (n) => {
+          const g = wanted.get(n);
+          if (!g) return { n, name: `${prefix.trim()}${n}`, link: null, note: 'group nahi mila' };
+          try {
+            const code = await sock.groupInviteCode(g.id);
+            return { n, name: g.name, link: `https://chat.whatsapp.com/${code}` };
+          } catch {
+            return { n, name: g.name, link: null, note: 'link nahi mila (admin nahi ho)' };
+          }
+        })
+      );
+      results.push(...part);
+      await sleep(400);
     }
     const text = results.filter((r) => r.link).map((r) => `${r.name}\n${r.link}`).join('\n\n');
     res.json({ results, text });
