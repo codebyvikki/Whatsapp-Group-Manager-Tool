@@ -1,4 +1,7 @@
 .env
 auth/
 node_modules/
-data.json.env
+data.json
+users.json
+stats.json
+stats.json.tmp

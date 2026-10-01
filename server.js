@@ -4,6 +4,7 @@ import QRCode from 'qrcode';
 import pino from 'pino';
 import fs from 'fs';
 import { MongoClient } from 'mongodb';
+import { createStats } from './stats.js';
 import makeWASocket, {
   useMultiFileAuthState,
   DisconnectReason,
@@ -22,6 +23,16 @@ const USERNAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{2,31}$/;
 const PASSWORD_MIN = 8;
 const PASSWORD_MAX = 128;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// A failed background request inside the WhatsApp library (for example
+// "Connection Closed" while the socket reconnects) must not take the whole
+// server down. Log it and keep running; the reconnect logic handles recovery.
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason?.message || reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err?.message || err);
+});
 
 /* =========================================================
    STORAGE
@@ -365,6 +376,15 @@ async function getGroups(force = false) {
   return groupCache.data;
 }
 
+const stats = createStats({
+  getDb,
+  getSock: () => (state === 'connected' ? sock : null),
+  getGroupCache: () => groupCache,
+  withLimit: withWALinkLimit,
+  sleep,
+  refreshGroups: () => getGroups(true)
+});
+
 function clearReconnectTimer() {
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
@@ -474,6 +494,7 @@ async function startWA() {
 
     sock = currentSocket;
     currentSocket.ev.on('creds.update', auth.saveCreds);
+    stats.attach(currentSocket);
 
     currentSocket.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
       if (sock !== currentSocket) return;
@@ -488,7 +509,9 @@ async function startWA() {
         qrDataUrl = null;
         reconnectDelay = 2000;
         groupCache = { at: 0, data: null };
-        getGroups(true).catch((e) => console.log('[wa] group preload:', e.message));
+        getGroups(true)
+          .then(() => stats.onOpen())
+          .catch((e) => console.log('[wa] group preload:', e.message));
       }
 
       if (connection === 'close') {
@@ -1195,11 +1218,16 @@ app.post('/api/logout-wa', requireAdmin, async (req, res) => {
   }
 });
 
+/* ---------- Live group stats ---------- */
+
+stats.routes(app, requireAuth, needWA);
+
 /* ---------- Static files ---------- */
 
 app.use(express.static('public'));
 
 await loadData();
+await stats.load();
 const admin = await ensureAdmin();
 await migrateLegacyLists(String(admin._id));
 
@@ -1219,6 +1247,7 @@ async function shutdown(signal) {
   server.close();
 
   try { if (sock) sock.end(undefined); } catch {}
+  try { await stats.flush(); } catch {}
   try { if (mongoClient) await mongoClient.close(); } catch {}
 
   process.exit(0);

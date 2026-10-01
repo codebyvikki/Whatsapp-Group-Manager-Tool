@@ -851,6 +851,14 @@
 
       <a
         class="ghost header-btn"
+        id="statsLink"
+        href="/stats.html"
+        hidden
+        style="text-decoration:none;display:inline-flex;align-items:center;"
+      >Live Stats</a>
+
+      <a
+        class="ghost header-btn"
         id="adminLink"
         href="/admin.html"
         hidden
@@ -1405,6 +1413,7 @@ async function boot() {
     $('accountName').textContent = me.user.username;
     $('accountRole').textContent = me.user.role === 'admin' ? 'Admin' : 'User';
     $('adminLink').hidden = me.user.role !== 'admin';
+    $('statsLink').hidden = false;
 
     poll();
 

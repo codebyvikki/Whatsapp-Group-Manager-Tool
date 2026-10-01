@@ -1,0 +1,900 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live Group Stats</title>
+
+<style>
+  :root {
+    --bg: #f6f8f7;
+    --card: #ffffff;
+    --surface: #f8faf9;
+    --ink: #17221c;
+    --muted: #6b7770;
+    --brand: #128c55;
+    --brand-dark: #0b7144;
+    --brand-soft: #e8f6ef;
+    --line: #e1e7e3;
+    --danger: #c62828;
+    --danger-soft: #fff0f0;
+    --warning: #9a6700;
+    --shadow: 0 8px 30px rgba(18, 35, 27, .06);
+    --radius: 14px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1410;
+      --card: #151e19;
+      --surface: #1a251f;
+      --ink: #e8f0eb;
+      --muted: #98a69d;
+      --brand: #38c982;
+      --brand-dark: #2baa6d;
+      --brand-soft: #153c2b;
+      --line: #29362f;
+      --danger: #ff8a80;
+      --danger-soft: #351b1b;
+      --warning: #e7bd5a;
+      --shadow: 0 8px 30px rgba(0, 0, 0, .2);
+    }
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    margin: 0;
+    background:
+      radial-gradient(circle at top right, rgba(18,140,85,.07), transparent 30%),
+      var(--bg);
+    color: var(--ink);
+    font: 15px/1.55 system-ui, -apple-system, BlinkMacSystemFont,
+      "Segoe UI", "Noto Sans", sans-serif;
+    padding: 28px 18px 50px;
+  }
+
+  button,
+  input,
+  textarea {
+    font: inherit;
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  button:disabled {
+    opacity: .55;
+    cursor: not-allowed;
+  }
+
+  :focus-visible {
+    outline: 3px solid rgba(18,140,85,.25);
+    outline-offset: 2px;
+  }
+
+  main {
+    width: min(900px, 100%);
+    margin: 0 auto;
+    display: grid;
+    gap: 18px;
+  }
+
+  /* ---------------- Header ---------------- */
+
+  .app-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 4px 2px 10px;
+  }
+
+  .account-bar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .account-user {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 10px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--ink);
+    font-size: .78rem;
+    font-weight: 700;
+  }
+
+  .account-role {
+    color: var(--muted);
+    font-weight: 600;
+  }
+
+  .header-btn {
+    min-height: 34px;
+    padding: 7px 11px;
+    font-size: .78rem;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 13px;
+  }
+
+  .brand-icon {
+    width: 44px;
+    height: 44px;
+    display: grid;
+    place-items: center;
+    border-radius: 12px;
+    background: var(--brand);
+    color: #fff;
+    font-size: 20px;
+    font-weight: 800;
+    box-shadow: 0 6px 18px rgba(18,140,85,.22);
+  }
+
+  .brand-text h1 {
+    margin: 0;
+    font-size: 1.35rem;
+    letter-spacing: -.02em;
+  }
+
+  .brand-text p {
+    margin: 2px 0 0;
+    color: var(--muted);
+    font-size: .85rem;
+  }
+
+  /* ---------------- Cards ---------------- */
+
+  section {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 22px;
+    display: grid;
+    gap: 16px;
+    box-shadow: var(--shadow);
+  }
+
+  .section-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .section-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 9px;
+    flex-wrap: wrap;
+  }
+
+  .sync-meta {
+    color: var(--muted);
+    font-size: .76rem;
+    white-space: nowrap;
+  }
+
+  .section-title {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 700;
+    letter-spacing: -.01em;
+  }
+
+  .section-description {
+    margin: 3px 0 0;
+    color: var(--muted);
+    font-size: .86rem;
+  }
+
+  /* ---------------- Status ---------------- */
+
+  .status {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    color: var(--muted);
+    font-size: .78rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--muted);
+  }
+
+  .status.connected {
+    background: var(--brand-soft);
+    color: var(--brand);
+    border-color: rgba(18,140,85,.2);
+  }
+
+  .status.connected .status-dot {
+    background: var(--brand);
+  }
+
+  /* ---------------- Forms ---------------- */
+
+  .form-grid {
+    display: grid;
+    gap: 14px;
+  }
+
+  .two-column {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+
+  label {
+    display: grid;
+    gap: 7px;
+    color: var(--muted);
+    font-size: .83rem;
+    font-weight: 600;
+  }
+
+  input[type=text],
+  input[type=number],
+  input[type=password],
+  input:not([type]),
+  textarea {
+    width: 100%;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface);
+    color: var(--ink);
+    padding: 11px 13px;
+    outline: none;
+    transition: border-color .15s, box-shadow .15s, background .15s;
+  }
+
+  input[type=text]:focus,
+  input[type=number]:focus,
+  input[type=password]:focus,
+  input:not([type]):focus,
+  textarea:focus {
+    border-color: var(--brand);
+    box-shadow: 0 0 0 3px rgba(18,140,85,.10);
+    background: var(--card);
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--muted);
+    opacity: .75;
+  }
+
+  textarea {
+    min-height: 320px;
+    resize: vertical;
+    line-height: 1.6;
+  }
+
+  /* ---------------- Buttons ---------------- */
+
+  button {
+    min-height: 42px;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    padding: 10px 15px;
+    background: var(--brand);
+    color: #fff;
+    font-weight: 700;
+    transition:
+      background .15s,
+      transform .1s,
+      box-shadow .15s,
+      border-color .15s;
+  }
+
+  button:hover:not(:disabled) {
+    background: var(--brand-dark);
+    box-shadow: 0 5px 14px rgba(18,140,85,.18);
+  }
+
+  button:active:not(:disabled) {
+    transform: translateY(1px);
+  }
+
+  button.ghost {
+    background: transparent;
+    color: var(--ink);
+    border-color: var(--line);
+    box-shadow: none;
+  }
+
+  button.ghost:hover:not(:disabled) {
+    background: var(--surface);
+    border-color: #cbd5cf;
+    box-shadow: none;
+  }
+
+  button.small {
+    min-height: 34px;
+    padding: 7px 10px;
+    font-size: .78rem;
+    border-radius: 8px;
+  }
+
+  .danger-btn {
+    color: var(--danger) !important;
+  }
+
+  /* ---------------- Login ---------------- */
+
+  #login {
+    max-width: 460px;
+    width: 100%;
+    margin: 40px auto 0;
+  }
+
+  .login-icon {
+    width: 52px;
+    height: 52px;
+    display: grid;
+    place-items: center;
+    border-radius: 14px;
+    background: var(--brand-soft);
+    color: var(--brand);
+    font-size: 22px;
+    font-weight: 800;
+    margin-bottom: 2px;
+  }
+
+  .login-form {
+    display: grid;
+    gap: 13px;
+  }
+
+  /* ---------------- Connection ---------------- */
+
+  .connection-box {
+    display: grid;
+    gap: 15px;
+  }
+
+  .connection-message {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    color: var(--muted);
+  }
+
+  .qr {
+    display: grid;
+    justify-items: center;
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .qr img {
+    width: 260px;
+    max-width: 100%;
+    border-radius: 12px;
+    background: #fff;
+    padding: 8px;
+    border: 1px solid var(--line);
+  }
+
+  .qr-instruction {
+    text-align: center;
+    color: var(--muted);
+    font-size: .85rem;
+  }
+
+  /* ---------------- Tabs ---------------- */
+
+  .tabs {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 11px;
+    width: fit-content;
+    max-width: 100%;
+  }
+
+  .tabs button {
+    min-height: 36px;
+    padding: 7px 13px;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--muted);
+    border: 0;
+    box-shadow: none;
+    font-size: .82rem;
+  }
+
+  .tabs button:hover:not(:disabled) {
+    background: var(--card);
+    color: var(--ink);
+    box-shadow: none;
+  }
+
+  .tabs button.on {
+    background: var(--brand);
+    color: #fff;
+    box-shadow: 0 3px 8px rgba(18,140,85,.18);
+  }
+
+  .app-footer {
+    width: min(900px, 100%);
+    margin: 4px auto 0;
+    text-align: center;
+    color: var(--muted);
+    font-size: .72rem;
+    letter-spacing: .02em;
+    opacity: .75;
+  }
+
+  .app-footer span {
+    color: var(--brand);
+    font-weight: 700;
+  }
+
+
+  /* ---------------- Utility ---------------- */
+
+  .err {
+    color: var(--danger);
+    font-size: .82rem;
+  }
+
+  /* ---------------- Live Stats ---------------- */
+
+  [hidden] { display: none !important; }
+
+  a.ghost { text-decoration: none; display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 10px; color: var(--ink); font-weight: 700; }
+  a.ghost:hover { background: var(--surface); }
+
+  .status.live { background: var(--brand-soft); color: var(--brand); border-color: rgba(18,140,85,.2); }
+  .status.live .status-dot { background: var(--brand); animation: pulse 1.8s ease-out infinite; }
+  .status.warn { color: var(--warning); }
+  .status.warn .status-dot { background: var(--warning); }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(18,140,85,.45); } 100% { box-shadow: 0 0 0 7px rgba(18,140,85,0); } }
+
+  .tabs { flex-wrap: wrap; }
+  .tabs button.on:hover:not(:disabled) { background: var(--brand); color: #fff; }
+  .tabs .n { margin-left: 6px; padding: 1px 7px; border-radius: 999px; background: var(--brand-soft); color: var(--brand); font-size: .72rem; }
+  .tabs button.on .n { background: rgba(255,255,255,.22); color: #fff; }
+
+  .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .toolbar input[type=text] { flex: 1 1 200px; width: auto; }
+  .toolbar .check { display: inline-flex; flex-direction: row; align-items: center; gap: 8px; color: var(--ink); font-size: .84rem; }
+  .toolbar .check input { width: 17px; height: 17px; accent-color: var(--brand); }
+
+  .kpi { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .kpi b { font-size: 2.1rem; letter-spacing: -.03em; line-height: 1; }
+  .kpi span { color: var(--muted); font-size: .86rem; }
+
+  .note { font-size: .8rem; color: var(--muted); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; }
+
+  .rows { display: grid; gap: 8px; }
+  .row { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); overflow: hidden; transition: border-color .2s, background .2s; }
+  .row.flash { border-color: var(--brand); background: var(--brand-soft); }
+  .row-head { display: flex; align-items: center; gap: 12px; padding: 10px 12px; }
+  .row-head input { width: 17px; height: 17px; accent-color: var(--brand); flex: none; }
+  .row-main { flex: 1; min-width: 0; text-align: left; background: transparent; color: var(--ink); border: 0; box-shadow: none; padding: 2px 0; min-height: 0; display: grid; gap: 3px; }
+  .row-main:hover:not(:disabled) { background: transparent; box-shadow: none; }
+  .gname { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .gmeta { display: flex; gap: 6px; flex-wrap: wrap; font-weight: 500; font-size: .76rem; color: var(--muted); }
+  .chip { padding: 1px 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--card); }
+  .chip.up { color: var(--brand); } .chip.down { color: var(--danger); } .chip.off { color: var(--warning); }
+  .gnum { font-size: 1.55rem; font-weight: 800; letter-spacing: -.02em; min-width: 3ch; text-align: right; font-variant-numeric: tabular-nums; }
+  .gnum.dim { font-size: .82rem; font-weight: 700; color: var(--warning); }
+
+  .detail { border-top: 1px solid var(--line); padding: 12px; display: grid; gap: 8px; background: var(--card); font-size: .84rem; }
+  .detail .line { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; border-bottom: 1px dashed var(--line); }
+  .detail .line:last-child { border-bottom: 0; }
+  .detail .line span:last-child { color: var(--muted); text-align: right; }
+  .detail h4 { margin: 4px 0 0; font-size: .82rem; }
+
+  .board { display: grid; gap: 4px; }
+  .board .line { display: flex; justify-content: space-between; gap: 10px; font-size: .86rem; padding: 6px 0; border-bottom: 1px dashed var(--line); }
+  .board small { color: var(--muted); display: block; }
+
+  .dl { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .dl .label { color: var(--muted); font-size: .82rem; margin-right: 4px; }
+  .empty { text-align: center; color: var(--muted); padding: 26px 0; }
+
+  @media (max-width: 640px) {
+    .gnum { font-size: 1.3rem; }
+    .dl button { flex: 1 1 45%; }
+    .section-header { flex-direction: column; }
+    .section-actions { width: 100%; justify-content: space-between; }
+  }
+  @media (prefers-reduced-motion: reduce) { .status.live .status-dot { animation: none; } .row { transition: none; } }
+</style>
+</head>
+<body>
+<main>
+
+  <header class="app-header">
+    <div class="brand">
+      <div class="brand-icon">GL</div>
+      <div class="brand-text">
+        <h1>Live Group Stats</h1>
+        <p>Pending, invite-link joins, added members and totals</p>
+      </div>
+    </div>
+    <div class="account-bar">
+      <a class="ghost header-btn" href="/">Link Organizer</a>
+      <div class="status" id="live"><span class="status-dot"></span><span id="liveText">Connecting</span></div>
+    </div>
+  </header>
+
+  <section id="blocked" hidden>
+    <h2 class="section-title">WhatsApp is not connected</h2>
+    <p class="section-description">Open the Link Organizer, scan the QR code, then come back here. Stats start tracking automatically after connecting.</p>
+    <div><a class="ghost header-btn" href="/">Go to Link Organizer</a></div>
+  </section>
+
+  <section id="app" hidden>
+
+    <div class="section-header">
+      <div>
+        <h2 class="section-title">Group Stats</h2>
+        <p class="section-description" id="sub">Loading groups…</p>
+      </div>
+      <div class="section-actions">
+        <span class="sync-meta" id="syncMeta">Not synced yet</span>
+        <button class="ghost small" id="refresh" title="Sync groups and refresh live stats">Refresh all</button>
+      </div>
+    </div>
+
+    <div class="tabs" id="tabs">
+      <button data-tab="pending" class="on">Pending<span class="n" id="n-pending">0</span></button>
+      <button data-tab="link">Invite links<span class="n" id="n-link">0</span></button>
+      <button data-tab="added">Total added<span class="n" id="n-added">0</span></button>
+      <button data-tab="total">Total members<span class="n" id="n-total">0</span></button>
+    </div>
+
+    <div class="kpi"><b id="kpi">0</b><span id="kpiLabel"></span></div>
+    <div class="note" id="note" hidden></div>
+
+    <div class="toolbar">
+      <input type="text" id="q" placeholder="Search group name or number…">
+      <label class="check"><input type="checkbox" id="all"> Select all</label>
+      <span class="mute" id="selCount"></span>
+    </div>
+
+    <div class="board" id="board" hidden></div>
+    <div class="rows" id="rows"></div>
+
+    <div class="danger-zone" style="flex-direction:column;gap:10px;align-items:stretch">
+      <div class="dl">
+        <span class="label" id="dlLabel">Download</span>
+        <button class="ghost small" data-dl="summary:txt">List · TXT</button>
+        <button class="ghost small" data-dl="summary:csv">List · CSV</button>
+        <button class="ghost small" data-dl="detail:txt">With numbers · TXT</button>
+        <button class="ghost small" data-dl="detail:csv">With numbers · CSV</button>
+      </div>
+      <div class="err" id="err"></div>
+    </div>
+
+  </section>
+</main>
+
+<footer class="app-footer">Developed by <span>Vikki Prime</span></footer>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+async function api(url, body) {
+  const r = await fetch(url, body === undefined ? { credentials: 'same-origin' } : {
+    method: 'POST', credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw Object.assign(new Error(j.error || 'Request failed'), { status: r.status });
+  return j;
+}
+
+const TABS = {
+  pending: { label: 'pending join requests', kinds: [] },
+  link: { label: 'joined through invite links', kinds: ['link'] },
+  added: { label: 'members added by other members / admins', kinds: ['added'] },
+  total: { label: 'members across the groups', kinds: ['link', 'added', 'other', 'left', 'removed'] }
+};
+const KIND = { link: 'Joined via link', added: 'Added', other: 'Joined (while offline)', left: 'Left', removed: 'Removed', req: 'Requested to join', rejected: 'Request rejected', revoked: 'Request withdrawn' };
+
+let rows = [], board = [], tab = 'pending', query = '', tz = 'Asia/Kolkata', lastSync = null;
+const sel = new Set(), open = new Set(), details = new Map();
+let progress = { running: false, done: 0, total: 0 };
+
+const fmt = (n) => Number(n).toLocaleString('en-IN');
+const fdate = (t) => t ? new Date(t).toLocaleString('en-GB', { timeZone: tz, hour12: false, day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+function ago(t) {
+  if (!t) return 'never';
+  const s = Math.max(0, (Date.now() - t) / 1000);
+  if (s < 45) return 'just now';
+  if (s < 3600) return Math.round(s / 60) + ' min ago';
+  if (s < 86400) return Math.round(s / 3600) + ' h ago';
+  return Math.round(s / 86400) + ' d ago';
+}
+
+/* ---------- value per tab ---------- */
+const main = (r) => tab === 'pending' ? r.pending : tab === 'link' ? r.link : tab === 'added' ? r.added : r.total;
+
+function meta(r) {
+  const c = [];
+  if (tab === 'pending') {
+    if (r.state === 'ok') c.push(`<span class="chip">updated ${ago(r.pendingAt)}</span>`);
+    else if (r.state === 'off') c.push('<span class="chip off">approval is off</span>');
+    else if (r.state === 'not-admin') c.push('<span class="chip off">you are not admin here</span>');
+    else c.push('<span class="chip off">not loaded yet</span>');
+  } else if (tab === 'link') {
+    c.push(`<span class="chip">tracking since ${fdate(r.since)}</span>`);
+  } else if (tab === 'added') {
+    r.adders.slice(0, 3).forEach((a) => c.push(`<span class="chip">${esc(a.who)} · ${a.n}</span>`));
+    if (r.adders.length > 3) c.push(`<span class="chip">+${r.adders.length - 3} more</span>`);
+    if (!r.adders.length) c.push('<span class="chip">nobody yet</span>');
+  } else {
+    c.push(`<span class="chip">start ${r.baseline}</span>`);
+    if (r.link) c.push(`<span class="chip up">link +${r.link}</span>`);
+    if (r.added) c.push(`<span class="chip up">added +${r.added}</span>`);
+    if (r.other) c.push(`<span class="chip up">other +${r.other}</span>`);
+    if (r.left) c.push(`<span class="chip down">left −${r.left}</span>`);
+    if (r.removed) c.push(`<span class="chip down">removed −${r.removed}</span>`);
+  }
+  return c.join('');
+}
+
+function detailHtml(r) {
+  const d = details.get(r.id);
+  if (!d) return '<div class="mute">Loading…</div>';
+  let h = '';
+  if (tab === 'pending') {
+    h += d.pending.length
+      ? d.pending.map((p) => `<div class="line"><span>${esc(p.who)}</span><span>${p.method === 'invite_link' ? 'via invite link' : p.method === 'non_admin_add' ? 'added by ' + esc(p.by || 'a member') : esc(p.method || '')} ${p.at ? '· ' + fdate(p.at) : ''}</span></div>`).join('')
+      : '<div class="mute">No pending requests.</div>';
+    return h;
+  }
+  if (tab === 'added') {
+    h += r.adders.length
+      ? '<h4>Who added how many</h4>' + r.adders.map((a) => `<div class="line"><span>${esc(a.who)}</span><span>${a.n} added</span></div>`).join('')
+      : '';
+  }
+  const kinds = TABS[tab].kinds;
+  const ev = d.recent.filter((e) => kinds.includes(e.kind));
+  h += '<h4>Recent activity</h4>';
+  h += ev.length
+    ? ev.slice(0, 25).map((e) => `<div class="line"><span>${esc(e.who)} · ${KIND[e.kind] || e.kind}${e.by && e.kind !== 'left' ? ' (' + esc(e.by) + ')' : ''}</span><span>${fdate(e.at)}</span></div>`).join('')
+    : '<div class="mute">Nothing recorded yet.</div>';
+  return h;
+}
+
+/* ---------- render ---------- */
+function visible() {
+  const q = query.trim().toLowerCase();
+  return rows.filter((r) => !q || r.name.toLowerCase().includes(q));
+}
+
+function rowHtml(r) {
+  const v = main(r);
+  const num = v === null || v === undefined
+    ? `<div class="gnum dim">${r.state === 'not-admin' ? 'not admin' : '—'}</div>`
+    : `<div class="gnum">${fmt(v)}</div>`;
+  const isOpen = open.has(r.id);
+  return `<div class="row" data-id="${esc(r.id)}">
+    <div class="row-head">
+      <input type="checkbox" data-sel="${esc(r.id)}" ${sel.has(r.id) ? 'checked' : ''} aria-label="Select ${esc(r.name)}">
+      <button class="row-main" data-open="${esc(r.id)}" aria-expanded="${isOpen}">
+        <span class="gname">${esc(r.name)}</span><span class="gmeta">${meta(r)}</span>
+      </button>
+      ${num}
+    </div>
+    ${isOpen ? `<div class="detail">${detailHtml(r)}</div>` : ''}
+  </div>`;
+}
+
+function render() {
+  const list = visible();
+  $('rows').innerHTML = list.length ? list.map(rowHtml).join('') : '<div class="empty">No groups match.</div>';
+
+  const sum = (f) => rows.reduce((s, r) => s + (f(r) || 0), 0);
+  $('n-pending').textContent = fmt(sum((r) => r.pending));
+  $('n-link').textContent = fmt(sum((r) => r.link));
+  $('n-added').textContent = fmt(sum((r) => r.added));
+  $('n-total').textContent = fmt(sum((r) => r.total));
+
+  const shown = list.reduce((s, r) => s + (main(r) || 0), 0);
+  $('kpi').textContent = fmt(shown);
+  const unknown = tab === 'pending' ? list.filter((r) => r.state === 'not-admin' || r.state === 'unknown' || r.state === 'error').length : 0;
+  $('kpiLabel').textContent = `${TABS[tab].label} · ${list.length} groups` + (unknown ? ` · ${unknown} not readable` : '');
+
+  const since = rows.length ? Math.min(...rows.map((r) => r.since)) : 0;
+  const note = $('note');
+  if (tab === 'pending') {
+    note.hidden = false;
+    note.textContent = 'Pending numbers are read directly from WhatsApp, so they are exact. Only groups where you are an admin and approval is on can show a number.';
+  } else {
+    note.hidden = false;
+    note.textContent = `Recorded live from ${fdate(since)}. WhatsApp does not share who joined or who added before tracking began, so older members are counted as “start”. Keep the server running to avoid gaps.`;
+  }
+
+  const b = $('board');
+  if (tab === 'added' && board.length) {
+    b.hidden = false;
+    b.innerHTML = '<h4 style="margin:0">Top adders across all groups</h4>' + board.slice(0, 15).map((a) =>
+      `<div class="line"><span>${esc(a.who)}<small>${a.groups.map((g) => esc(g.name) + ': ' + g.n).join(' · ')}</small></span><b>${a.n}</b></div>`).join('');
+  } else b.hidden = true;
+
+  const ids = list.map((r) => r.id);
+  $('all').checked = ids.length > 0 && ids.every((i) => sel.has(i));
+  $('selCount').textContent = sel.size ? `${sel.size} selected` : '';
+  $('dlLabel').textContent = sel.size ? `Download ${sel.size} selected` : `Download all ${rows.length}`;
+  $('sub').textContent = `${rows.length} groups · live`;
+  $('syncMeta').textContent = lastSync ? `Synced ${ago(lastSync)}` : 'Not synced yet';
+
+  const btn = $('refresh');
+  btn.disabled = progress.running;
+  btn.textContent = progress.running ? `Refreshing ${progress.done}/${progress.total}` : 'Refresh all';
+}
+
+/* ---------- data ---------- */
+async function loadOverview() {
+  const o = await api('/api/stats/overview');
+  rows = o.rows; board = o.leaderboard; tz = o.tz; progress = o.refresh; lastSync = o.lastSync || o.refresh?.at || null;
+  render();
+}
+
+async function loadDetail(id) {
+  try { details.set(id, await api('/api/stats/group/' + encodeURIComponent(id))); } catch { details.set(id, { pending: [], recent: [] }); }
+  if (open.has(id)) render();
+}
+
+function mergeRows(updated) {
+  const flashIds = [];
+  for (const u of updated) {
+    const i = rows.findIndex((r) => r.id === u.id);
+    if (i >= 0) { if (main(rows[i]) !== main(u)) flashIds.push(u.id); rows[i] = u; } else rows.push(u);
+    if (open.has(u.id)) loadDetail(u.id);
+  }
+  rows.sort((a, b) => (a.num - b.num) || a.name.localeCompare(b.name));
+  render();
+  flashIds.forEach((id) => {
+    const el = document.querySelector(`.row[data-id="${CSS.escape(id)}"]`);
+    if (el) { el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 1200); }
+  });
+  api('/api/stats/overview').then((o) => { board = o.leaderboard; lastSync = o.lastSync || o.refresh?.at || lastSync; render(); }).catch(() => {});
+}
+
+function live() {
+  const dot = $('live'), txt = $('liveText');
+  const es = new EventSource('/api/stats/stream');
+  es.onopen = () => { dot.className = 'status live'; txt.textContent = 'Live'; loadOverview().catch(() => {}); };
+  es.addEventListener('rows', (e) => mergeRows(JSON.parse(e.data).rows));
+  es.addEventListener('progress', (e) => { progress = JSON.parse(e.data); render(); if (!progress.running) loadOverview().catch(() => {}); });
+  es.onerror = () => { dot.className = 'status warn'; txt.textContent = 'Reconnecting'; };
+}
+
+/* ---------- events ---------- */
+$('tabs').onclick = (e) => {
+  const b = e.target.closest('button[data-tab]');
+  if (!b) return;
+  tab = b.dataset.tab; open.clear();
+  document.querySelectorAll('#tabs button').forEach((x) => x.classList.toggle('on', x === b));
+  render();
+};
+
+$('rows').onclick = (e) => {
+  const o = e.target.closest('[data-open]');
+  if (o) {
+    const id = o.dataset.open;
+    if (open.has(id)) open.delete(id); else { open.add(id); loadDetail(id); }
+    render();
+  }
+};
+$('rows').onchange = (e) => {
+  const id = e.target.dataset?.sel;
+  if (!id) return;
+  e.target.checked ? sel.add(id) : sel.delete(id);
+  render();
+};
+$('all').onchange = (e) => { visible().forEach((r) => e.target.checked ? sel.add(r.id) : sel.delete(r.id)); render(); };
+$('q').oninput = (e) => { query = e.target.value; render(); };
+
+$('refresh').onclick = async () => {
+  $('err').textContent = '';
+  try {
+    progress = (await api('/api/stats/refresh', {})).refresh;
+    render();
+  } catch (e) {
+    $('err').textContent = e.message;
+  }
+};
+
+document.querySelectorAll('[data-dl]').forEach((b) => b.onclick = async () => {
+  const [scope, format] = b.dataset.dl.split(':');
+  $('err').textContent = '';
+  try {
+    let r = await fetch('/api/stats/export', {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tab, scope, format, ids: [...sel] })
+    });
+
+    if (!r.ok && [502, 503, 504].includes(r.status)) {
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      r = await fetch('/api/stats/export', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tab, scope, format, ids: [...sel] })
+      });
+    }
+
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Download failed');
+    const name = /filename="([^"]+)"/.exec(r.headers.get('Content-Disposition') || '')?.[1] || `stats.${format}`;
+    const url = URL.createObjectURL(await r.blob());
+    Object.assign(document.createElement('a'), { href: url, download: name }).click();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  } catch (e) { $('err').textContent = e.message; }
+});
+
+/* ---------- boot ---------- */
+async function getWAStatusWithRetry() {
+  for (let i = 0; i < 4; i++) {
+    const st = await api('/api/status');
+    if (st.state === 'connected') return st;
+    if (i < 3) await new Promise((r) => setTimeout(r, 1200));
+  }
+  return api('/api/status');
+}
+
+(async function boot() {
+  try {
+    const me = await api('/api/me');
+    if (!me.loggedIn) return (location.href = '/');
+    const st = await getWAStatusWithRetry();
+    if (st.state !== 'connected') {
+      $('blocked').hidden = false;
+      $('live').className = 'status warn';
+      $('liveText').textContent = st.state === 'starting' ? 'Reconnecting' : 'Not connected';
+      return;
+    }
+    $('app').hidden = false;
+    await loadOverview();
+    live();
+    setInterval(render, 30000);
+  } catch (e) {
+    if (e.status === 401) location.href = '/'; else { $('blocked').hidden = false; }
+  }
+})();
+</script>
+</body>
+</html>
