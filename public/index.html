@@ -859,6 +859,14 @@
 
       <a
         class="ghost header-btn"
+        id="permissionsLink"
+        href="/permissions.html"
+        hidden
+        style="text-decoration:none;display:inline-flex;align-items:center;"
+      >Group Permissions</a>
+
+      <a
+        class="ghost header-btn"
         id="adminLink"
         href="/admin.html"
         hidden
@@ -1399,6 +1407,7 @@ async function boot() {
       $('tool').hidden = true;
       $('accountBar').hidden = true;
       $('adminLink').hidden = true;
+      $('permissionsLink').hidden = true;
       $('logoutBtn').hidden = true;
 
       updateHeaderStatus(false);
@@ -1414,6 +1423,7 @@ async function boot() {
     $('accountRole').textContent = me.user.role === 'admin' ? 'Admin' : 'User';
     $('adminLink').hidden = me.user.role !== 'admin';
     $('statsLink').hidden = false;
+    $('permissionsLink').hidden = me.user.role !== 'admin';
 
     poll();
 

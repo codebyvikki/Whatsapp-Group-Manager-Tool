@@ -16,6 +16,17 @@ const PANEL_USER = String(process.env.PANEL_USER || 'admin').trim();
 const PANEL_PASS = String(process.env.PANEL_PASS || 'change-me');
 const MAX_JSON_BYTES = process.env.MAX_JSON_BYTES || '200kb';
 const MAX_LINKS_PER_JOB = Math.max(1, Number(process.env.MAX_LINKS_PER_JOB || 500));
+const MAX_PERMISSION_GROUPS = Math.max(1, Number(process.env.MAX_PERMISSION_GROUPS || 500));
+const PERMISSION_CONCURRENCY = Math.min(3, Math.max(1, Number(process.env.PERMISSION_CONCURRENCY || 3)));
+const PERMISSION_START_GAP_MS = Math.max(100, Number(process.env.PERMISSION_START_GAP_MS || 140));
+const PERMISSION_MAX_GAP_MS = Math.max(PERMISSION_START_GAP_MS, Number(process.env.PERMISSION_MAX_GAP_MS || 1800));
+const PERMISSION_RETRY_BASE_MS = Math.max(400, Number(process.env.PERMISSION_RETRY_BASE_MS || 600));
+const PERMISSION_MAX_ATTEMPTS = Math.max(5, Number(process.env.PERMISSION_MAX_ATTEMPTS || 7));
+const PERMISSION_VERIFY_PASSES = Math.min(4, Math.max(1, Number(process.env.PERMISSION_VERIFY_PASSES || 3)));
+let permissionNextAllowedAt = 0;
+let permissionCooldownUntil = 0;
+let permissionAdaptiveGapMs = PERMISSION_START_GAP_MS;
+let permissionHealthySuccesses = 0;
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_MAX_ATTEMPTS = 8;
@@ -374,6 +385,200 @@ async function getGroups(force = false) {
   }
   groupCache = { at: Date.now(), data: await sock.groupFetchAllParticipating() };
   return groupCache.data;
+}
+
+function getGroupPermissionState(g) {
+  return {
+    editGroupSettings: !Boolean(g.restrict),
+    sendNewMessages: !Boolean(g.announce),
+    addOtherMembers: Boolean(g.memberAddMode),
+    approveNewMembers: Boolean(g.joinApprovalMode),
+    // Baileys 6.7.24 exposes the history-sharing event type but does not
+    // expose a supported group-permission setter or metadata field for it.
+    sendMessageHistory: null,
+    sendMessageHistorySupported: false
+  };
+}
+
+function normalizePermissionChanges(input) {
+  const out = {};
+  const keys = ['editGroupSettings', 'sendNewMessages', 'addOtherMembers', 'approveNewMembers', 'sendMessageHistory'];
+
+  if (!input || typeof input !== 'object') return out;
+
+  for (const key of keys) {
+    if (input[key] === undefined || input[key] === null) continue;
+    if (typeof input[key] !== 'boolean') {
+      throw new Error(`Invalid value for ${key}`);
+    }
+    if (key === 'sendMessageHistory') {
+      throw new Error('Send message history is not supported by the installed Baileys version');
+    }
+    out[key] = input[key];
+  }
+
+  return out;
+}
+
+function isPermissionRateError(message) {
+  return /rate|overlimit|429|too many|throttl/i.test(String(message || ''));
+}
+
+function isPermanentPermissionError(message) {
+  return /not-authorized|forbidden|403|bad-request|invalid|not-admin|not a participant|not an admin/i.test(String(message || ''));
+}
+
+function notePermissionSuccess() {
+  permissionHealthySuccesses++;
+  // When WhatsApp is accepting requests cleanly, slowly return toward the
+  // fast baseline instead of staying in a conservative cooldown forever.
+  if (permissionHealthySuccesses >= 8) {
+    permissionHealthySuccesses = 0;
+    permissionAdaptiveGapMs = Math.max(
+      PERMISSION_START_GAP_MS,
+      Math.floor(permissionAdaptiveGapMs * 0.8)
+    );
+  }
+}
+
+function notePermissionRateLimit(attempt = 1) {
+  permissionHealthySuccesses = 0;
+  permissionAdaptiveGapMs = Math.min(
+    PERMISSION_MAX_GAP_MS,
+    Math.max(PERMISSION_START_GAP_MS, Math.ceil(permissionAdaptiveGapMs * 1.8))
+  );
+  permissionCooldownUntil = Math.max(
+    permissionCooldownUntil,
+    Date.now() + Math.min(12000, 1200 + attempt * 900)
+  );
+}
+
+async function waitPermissionSlot() {
+  while (true) {
+    const now = Date.now();
+    const target = Math.max(permissionNextAllowedAt, permissionCooldownUntil);
+    const wait = target - now;
+    if (wait > 0) await sleep(wait);
+    const after = Date.now();
+    if (after >= permissionNextAllowedAt && after >= permissionCooldownUntil) {
+      permissionNextAllowedAt = after + permissionAdaptiveGapMs;
+      return;
+    }
+  }
+}
+
+async function runPermissionOperation(operation) {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= PERMISSION_MAX_ATTEMPTS; attempt++) {
+    try {
+      await waitPermissionSlot();
+      const result = await withWALinkLimit(operation);
+      notePermissionSuccess();
+      return result;
+    } catch (e) {
+      lastError = e;
+      const message = errText(e);
+      if (isPermanentPermissionError(message)) break;
+
+      const rateLimited = isPermissionRateError(message);
+      if (rateLimited) notePermissionRateLimit(attempt);
+
+      if (attempt === PERMISSION_MAX_ATTEMPTS) break;
+
+      const delay = rateLimited
+        ? Math.min(14000, PERMISSION_RETRY_BASE_MS * (attempt + 1) * 2)
+        : Math.min(7000, PERMISSION_RETRY_BASE_MS * attempt);
+      await sleep(delay);
+    }
+  }
+
+  throw lastError || new Error('Permission update failed');
+}
+
+async function applyGroupPermissionChanges(jid, changes) {
+  const applied = [];
+  const failed = [];
+
+  const operations = [
+    ['editGroupSettings', () => sock.groupSettingUpdate(
+      jid,
+      changes.editGroupSettings ? 'unlocked' : 'locked'
+    )],
+    ['sendNewMessages', () => sock.groupSettingUpdate(
+      jid,
+      changes.sendNewMessages ? 'not_announcement' : 'announcement'
+    )],
+    ['addOtherMembers', () => sock.groupMemberAddMode(
+      jid,
+      changes.addOtherMembers ? 'all_member_add' : 'admin_add'
+    )],
+    ['approveNewMembers', () => sock.groupJoinApprovalMode(
+      jid,
+      changes.approveNewMembers ? 'on' : 'off'
+    )]
+  ];
+
+  for (const [key, operation] of operations) {
+    if (!Object.prototype.hasOwnProperty.call(changes, key)) continue;
+    try {
+      await runPermissionOperation(operation);
+      applied.push(key);
+    } catch (e) {
+      failed.push({ key, error: errText(e) });
+    }
+  }
+
+  if (failed.length) {
+    const e = new Error(failed.map((x) => `${x.key}: ${x.error}`).join(' | '));
+    e.permissionApplied = applied.slice();
+    e.permissionFailed = failed;
+    throw e;
+  }
+
+  return applied;
+}
+
+function permissionMismatch(g, changes) {
+  if (!g) return Object.keys(changes);
+  const current = getGroupPermissionState(g);
+  return Object.entries(changes)
+    .filter(([key, value]) => current[key] !== value)
+    .map(([key]) => key);
+}
+
+async function verifyPermissionJob(job, ids, changes) {
+  let all = await getGroups(true);
+  let remaining = [];
+
+  for (let pass = 1; pass <= PERMISSION_VERIFY_PASSES; pass++) {
+    remaining = ids.filter((id) => permissionMismatch(all[id], changes).length > 0);
+    job.verifyPass = pass;
+    job.remaining = remaining.length;
+    job.updated = Date.now();
+    if (!remaining.length) return { all, remaining: [] };
+    if (pass === PERMISSION_VERIFY_PASSES) break;
+
+    // Only retry groups that are actually still out of sync. This avoids
+    // re-sending successful mutations and is much cheaper than retrying the
+    // entire batch blindly.
+    for (const id of remaining) {
+      const g = all[id];
+      const pendingKeys = permissionMismatch(g, changes);
+      if (!pendingKeys.length) continue;
+      const retryChanges = Object.fromEntries(
+        pendingKeys.map((key) => [key, changes[key]])
+      );
+      try {
+        await applyGroupPermissionChanges(id, retryChanges);
+      } catch {
+        // The next verification pass decides whether anything remains.
+      }
+    }
+    all = await getGroups(true);
+  }
+
+  return { all, remaining };
 }
 
 const stats = createStats({
@@ -909,6 +1114,182 @@ app.get('/api/groups', requireAuth, needWA, async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: 'Could not load groups: ' + e.message });
   }
+});
+
+/* ---------- Group permissions ---------- */
+
+const permissionJobs = new Map();
+
+function permissionJobPublic(job) {
+  return {
+    id: job.id,
+    state: job.state,
+    total: job.total,
+    done: job.done,
+    updated: job.updated,
+    phase: job.phase || 'running',
+    remaining: job.remaining ?? 0,
+    results: job.results,
+    error: job.error || null
+  };
+}
+
+async function runPermissionJob(job, ids, changes, all) {
+  job.state = 'running';
+  job.phase = 'applying';
+  job.updated = Date.now();
+  job.results = ids.map((id) => ({
+    id,
+    name: (all[id]?.subject || id).trim(),
+    ok: false,
+    applied: [],
+    failedPermissions: [],
+    error: null
+  }));
+
+  let nextIndex = 0;
+
+  async function worker() {
+    while (true) {
+      const index = nextIndex++;
+      if (index >= ids.length) return;
+      const id = ids[index];
+      const item = job.results[index];
+      const g = all[id];
+
+      if (!g) {
+        item.error = 'Group not found';
+        job.done++;
+        job.updated = Date.now();
+        continue;
+      }
+
+      try {
+        item.applied = await applyGroupPermissionChanges(id, changes);
+      } catch (e) {
+        item.applied = Array.isArray(e.permissionApplied) ? e.permissionApplied : [];
+        item.failedPermissions = Array.isArray(e.permissionFailed) ? e.permissionFailed : [];
+        item.error = errText(e);
+      }
+
+      job.done++;
+      job.updated = Date.now();
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(PERMISSION_CONCURRENCY, ids.length) }, () => worker())
+  );
+
+  // One/few verification passes turn this into a real "eventual completion"
+  // workflow: only groups whose WhatsApp state is still different are retried.
+  // This is much safer than blindly repeating every mutation.
+  job.phase = 'verifying';
+  job.updated = Date.now();
+  const verification = await verifyPermissionJob(job, ids, changes);
+  const verifiedAll = verification.all;
+
+  for (const item of job.results) {
+    const g = verifiedAll[item.id];
+    const mismatches = permissionMismatch(g, changes);
+    if (!mismatches.length) {
+      item.ok = true;
+      item.error = null;
+      item.failedPermissions = [];
+    } else {
+      item.ok = false;
+      item.failedPermissions = mismatches.map((key) => ({
+        key,
+        error: item.error || 'Permission did not reach the requested state'
+      }));
+      item.error = item.failedPermissions.map((x) => `${x.key}: ${x.error}`).join(' | ');
+    }
+  }
+
+  job.phase = 'done';
+  job.state = 'done';
+  job.done = job.total;
+  job.updated = Date.now();
+}
+
+app.get('/api/group-permissions', requireAdmin, needWA, async (req, res) => {
+  try {
+    const all = await getGroups(req.query.refresh === '1');
+    const groups = Object.values(all)
+      .map((g) => {
+        const name = (g.subject || '').trim();
+        const m = name.match(/(\d+)\s*$/);
+        return {
+          id: g.id,
+          name,
+          num: m ? parseInt(m[1], 10) : Infinity,
+          size: g.size ?? g.participants?.length ?? 0,
+          permissions: getGroupPermissionState(g)
+        };
+      })
+      .sort((a, b) => (a.num - b.num) || a.name.localeCompare(b.name));
+
+    res.json({
+      groups,
+      maxGroups: MAX_PERMISSION_GROUPS,
+      capabilities: {
+        sendMessageHistory: false
+      }
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'Could not load group permissions: ' + e.message });
+  }
+});
+
+app.post('/api/group-permissions', requireAdmin, needWA, async (req, res) => {
+  try {
+    const ids = Array.isArray(req.body?.ids)
+      ? [...new Set(req.body.ids.filter((id) => typeof id === 'string' && id.trim()).map((id) => id.trim()))]
+      : [];
+
+    if (!ids.length) return res.status(400).json({ error: 'No groups selected' });
+    if (ids.length > MAX_PERMISSION_GROUPS) {
+      return res.status(400).json({ error: `Please select no more than ${MAX_PERMISSION_GROUPS} groups at once.` });
+    }
+
+    const changes = normalizePermissionChanges(req.body?.changes);
+    if (!Object.keys(changes).length) {
+      return res.status(400).json({ error: 'No supported permission changes were requested' });
+    }
+
+    const all = await getGroups();
+    const job = {
+      id: crypto.randomUUID(),
+      state: 'queued',
+      total: ids.length,
+      done: 0,
+      updated: Date.now(),
+      results: [],
+      error: null
+    };
+
+    permissionJobs.set(job.id, job);
+    if (permissionJobs.size > 30) {
+      const first = permissionJobs.keys().next().value;
+      if (first) permissionJobs.delete(first);
+    }
+
+    runPermissionJob(job, ids, changes, all).catch((e) => {
+      job.state = 'error';
+      job.error = e.message;
+      job.updated = Date.now();
+    });
+
+    res.json({ ok: true, job: permissionJobPublic(job) });
+  } catch (e) {
+    res.status(400).json({ error: e.message || 'Could not start permission update' });
+  }
+});
+
+app.get('/api/group-permission-job/:id', requireAdmin, (req, res) => {
+  const job = permissionJobs.get(req.params.id);
+  if (!job) return res.status(404).json({ error: 'Permission job not found' });
+  res.json(permissionJobPublic(job));
 });
 
 /* ---------- Link jobs ---------- */
