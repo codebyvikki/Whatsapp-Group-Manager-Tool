@@ -4,7 +4,7 @@ import QRCode from 'qrcode';
 import pino from 'pino';
 import fs from 'fs';
 import { MongoClient } from 'mongodb';
-import { createStats } from './stats.js';
+import { createStats, registerStatsRoutes } from './stats.js';
 import makeWASocket, {
   useMultiFileAuthState,
   DisconnectReason,
@@ -22,11 +22,36 @@ const PERMISSION_START_GAP_MS = Math.max(100, Number(process.env.PERMISSION_STAR
 const PERMISSION_MAX_GAP_MS = Math.max(PERMISSION_START_GAP_MS, Number(process.env.PERMISSION_MAX_GAP_MS || 1800));
 const PERMISSION_RETRY_BASE_MS = Math.max(400, Number(process.env.PERMISSION_RETRY_BASE_MS || 600));
 const PERMISSION_MAX_ATTEMPTS = Math.max(5, Number(process.env.PERMISSION_MAX_ATTEMPTS || 7));
-const PERMISSION_VERIFY_PASSES = Math.min(4, Math.max(1, Number(process.env.PERMISSION_VERIFY_PASSES || 3)));
+const PERMISSION_VERIFY_PASSES = Math.min(2, Math.max(1, Number(process.env.PERMISSION_VERIFY_PASSES || 2)));
+const PERMISSION_GLOBAL_CONCURRENCY = Math.min(3, Math.max(1, Number(process.env.PERMISSION_GLOBAL_CONCURRENCY || 3)));
 let permissionNextAllowedAt = 0;
 let permissionCooldownUntil = 0;
 let permissionAdaptiveGapMs = PERMISSION_START_GAP_MS;
 let permissionHealthySuccesses = 0;
+let permissionQueueActive = 0;
+const permissionQueue = [];
+
+function pumpPermissionQueue() {
+  while (permissionQueueActive < PERMISSION_GLOBAL_CONCURRENCY && permissionQueue.length) {
+    const item = permissionQueue.shift();
+    permissionQueueActive++;
+    Promise.resolve()
+      .then(item.task)
+      .then(item.resolve, item.reject)
+      .finally(() => {
+        permissionQueueActive--;
+        pumpPermissionQueue();
+      });
+  }
+}
+
+function withPermissionConcurrency(task) {
+  return new Promise((resolve, reject) => {
+    permissionQueue.push({ task, resolve, reject });
+    pumpPermissionQueue();
+  });
+}
+
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_MAX_ATTEMPTS = 8;
@@ -110,6 +135,7 @@ function writeJsonAtomic(file, value) {
 
 let appData = {
   codes: {},
+  codesByUser: {},
   listsByUser: {}
 };
 
@@ -120,6 +146,7 @@ async function loadData() {
       const doc = await d.collection('data').findOne({ _id: 'appdata' });
       appData = {
         codes: doc?.codes || {},
+        codesByUser: doc?.codesByUser || {},
         listsByUser: doc?.listsByUser || {}
       };
       // Legacy lists are migrated after the admin record exists.
@@ -128,13 +155,14 @@ async function loadData() {
       const j = readJson(DATA_FILE, {});
       appData = {
         codes: j.codes || {},
+        codesByUser: j.codesByUser || {},
         listsByUser: j.listsByUser || {}
       };
       appData._legacyLists = Array.isArray(j.lists) ? j.lists : [];
     }
   } catch (e) {
     console.error('[storage] loadData:', e.message);
-    appData = { codes: {}, listsByUser: {}, _legacyLists: [] };
+    appData = { codes: {}, codesByUser: {}, listsByUser: {}, _legacyLists: [] };
   }
 }
 
@@ -142,6 +170,7 @@ async function saveData() {
   const payload = {
     _id: 'appdata',
     codes: appData.codes || {},
+    codesByUser: appData.codesByUser || {},
     listsByUser: appData.listsByUser || {}
   };
 
@@ -345,46 +374,88 @@ async function migrateLegacyLists(adminId) {
 }
 
 /* =========================================================
-   WHATSAPP - ONE SHARED SOCKET
+   WHATSAPP - ONE PERSISTENT SOCKET PER PANEL USER
+   Each authenticated user gets an isolated Baileys session,
+   group cache, QR state and stats tracker.
 ========================================================= */
 
-let sock = null;
-let state = 'starting';
-let qrDataUrl = null;
-let waStartPromise = null;
-let reconnectTimer = null;
-let reconnectDelay = 2000;
+const waSessions = new Map();
 
-let groupCache = { at: 0, data: null };
-const codeCache = new Map();
-const CODE_CACHE_TTL_MS = 10 * 60 * 1000;
-const MAX_WA_LINK_REQUESTS = Math.max(1, Number(process.env.MAX_WA_LINK_REQUESTS || 5));
-let waLinkActive = 0;
-const waLinkQueue = [];
-const codeInflight = new Map();
-
-async function withWALinkLimit(task) {
-  if (waLinkActive >= MAX_WA_LINK_REQUESTS) {
-    await new Promise((resolve) => waLinkQueue.push(resolve));
-  }
-
-  waLinkActive++;
-  try {
-    return await task();
-  } finally {
-    waLinkActive--;
-    const next = waLinkQueue.shift();
-    if (next) next();
-  }
+function userAuthPath(userId) {
+  const safe = String(userId || 'unknown').replace(/[^A-Za-z0-9_-]/g, '_');
+  return `./auth/${safe}`;
 }
 
-async function getGroups(force = false) {
-  if (!sock || state !== 'connected') throw new Error('WhatsApp is not connected');
-  if (!force && groupCache.data && Date.now() - groupCache.at < 10 * 60 * 1000) {
-    return groupCache.data;
+function createWAContext(userId) {
+  const wa = {
+    userId: String(userId),
+    sock: null,
+    state: 'starting',
+    qrDataUrl: null,
+    startPromise: null,
+    reconnectTimer: null,
+    reconnectDelay: 2000,
+    groupCache: { at: 0, data: null },
+    codeCache: new Map(),
+    codeInflight: new Map(),
+    linkActive: 0,
+    linkQueue: [],
+    stats: null,
+    statsLoaded: false,
+    statsAttached: false
+  };
+
+  wa.stats = createStats({
+    getDb,
+    ownerId: wa.userId,
+    getSock: () => (wa.state === 'connected' ? wa.sock : null),
+    getGroupCache: () => wa.groupCache,
+    withLimit: (task) => withWALinkLimit(wa, task),
+    sleep,
+    refreshGroups: () => getGroups(wa, true)
+  });
+
+  return wa;
+}
+
+function getWA(userId) {
+  const key = String(userId);
+  let wa = waSessions.get(key);
+  if (!wa) {
+    wa = createWAContext(key);
+    waSessions.set(key, wa);
   }
-  groupCache = { at: Date.now(), data: await sock.groupFetchAllParticipating() };
-  return groupCache.data;
+  return wa;
+}
+
+function withWALinkLimit(wa, task) {
+  const max = Math.max(8, Number(process.env.MAX_WA_LINK_REQUESTS || 8));
+  return new Promise((resolve, reject) => {
+    wa.linkQueue.push({ task, resolve, reject, max });
+    const pump = () => {
+      while (wa.linkActive < max && wa.linkQueue.length) {
+        const item = wa.linkQueue.shift();
+        wa.linkActive++;
+        Promise.resolve()
+          .then(item.task)
+          .then(item.resolve, item.reject)
+          .finally(() => {
+            wa.linkActive--;
+            pump();
+          });
+      }
+    };
+    pump();
+  });
+}
+
+async function getGroups(wa, force = false) {
+  if (!wa?.sock || wa.state !== 'connected') throw new Error('WhatsApp is not connected');
+  if (!force && wa.groupCache.data && Date.now() - wa.groupCache.at < 10 * 60 * 1000) {
+    return wa.groupCache.data;
+  }
+  wa.groupCache = { at: Date.now(), data: await wa.sock.groupFetchAllParticipating() };
+  return wa.groupCache.data;
 }
 
 function getGroupPermissionState(g) {
@@ -393,8 +464,6 @@ function getGroupPermissionState(g) {
     sendNewMessages: !Boolean(g.announce),
     addOtherMembers: Boolean(g.memberAddMode),
     approveNewMembers: Boolean(g.joinApprovalMode),
-    // Baileys 6.7.24 exposes the history-sharing event type but does not
-    // expose a supported group-permission setter or metadata field for it.
     sendMessageHistory: null,
     sendMessageHistorySupported: false
   };
@@ -408,15 +477,12 @@ function normalizePermissionChanges(input) {
 
   for (const key of keys) {
     if (input[key] === undefined || input[key] === null) continue;
-    if (typeof input[key] !== 'boolean') {
-      throw new Error(`Invalid value for ${key}`);
-    }
+    if (typeof input[key] !== 'boolean') throw new Error(`Invalid value for ${key}`);
     if (key === 'sendMessageHistory') {
       throw new Error('Send message history is not supported by the installed Baileys version');
     }
     out[key] = input[key];
   }
-
   return out;
 }
 
@@ -428,101 +494,42 @@ function isPermanentPermissionError(message) {
   return /not-authorized|forbidden|403|bad-request|invalid|not-admin|not a participant|not an admin/i.test(String(message || ''));
 }
 
-function notePermissionSuccess() {
-  permissionHealthySuccesses++;
-  // When WhatsApp is accepting requests cleanly, slowly return toward the
-  // fast baseline instead of staying in a conservative cooldown forever.
-  if (permissionHealthySuccesses >= 8) {
-    permissionHealthySuccesses = 0;
-    permissionAdaptiveGapMs = Math.max(
-      PERMISSION_START_GAP_MS,
-      Math.floor(permissionAdaptiveGapMs * 0.8)
-    );
-  }
-}
-
-function notePermissionRateLimit(attempt = 1) {
-  permissionHealthySuccesses = 0;
-  permissionAdaptiveGapMs = Math.min(
-    PERMISSION_MAX_GAP_MS,
-    Math.max(PERMISSION_START_GAP_MS, Math.ceil(permissionAdaptiveGapMs * 1.8))
-  );
-  permissionCooldownUntil = Math.max(
-    permissionCooldownUntil,
-    Date.now() + Math.min(12000, 1200 + attempt * 900)
-  );
-}
-
-async function waitPermissionSlot() {
-  while (true) {
-    const now = Date.now();
-    const target = Math.max(permissionNextAllowedAt, permissionCooldownUntil);
-    const wait = target - now;
-    if (wait > 0) await sleep(wait);
-    const after = Date.now();
-    if (after >= permissionNextAllowedAt && after >= permissionCooldownUntil) {
-      permissionNextAllowedAt = after + permissionAdaptiveGapMs;
-      return;
-    }
-  }
-}
-
-async function runPermissionOperation(operation) {
+async function runPermissionOperation(wa, operation) {
   let lastError = null;
-
   for (let attempt = 1; attempt <= PERMISSION_MAX_ATTEMPTS; attempt++) {
     try {
       await waitPermissionSlot();
-      const result = await withWALinkLimit(operation);
-      notePermissionSuccess();
-      return result;
+      return await withPermissionConcurrency(() => withWALinkLimit(wa, operation));
     } catch (e) {
       lastError = e;
       const message = errText(e);
       if (isPermanentPermissionError(message)) break;
-
       const rateLimited = isPermissionRateError(message);
       if (rateLimited) notePermissionRateLimit(attempt);
-
       if (attempt === PERMISSION_MAX_ATTEMPTS) break;
-
       const delay = rateLimited
         ? Math.min(14000, PERMISSION_RETRY_BASE_MS * (attempt + 1) * 2)
         : Math.min(7000, PERMISSION_RETRY_BASE_MS * attempt);
       await sleep(delay);
     }
   }
-
   throw lastError || new Error('Permission update failed');
 }
 
-async function applyGroupPermissionChanges(jid, changes) {
+async function applyGroupPermissionChanges(wa, jid, changes) {
   const applied = [];
   const failed = [];
-
   const operations = [
-    ['editGroupSettings', () => sock.groupSettingUpdate(
-      jid,
-      changes.editGroupSettings ? 'unlocked' : 'locked'
-    )],
-    ['sendNewMessages', () => sock.groupSettingUpdate(
-      jid,
-      changes.sendNewMessages ? 'not_announcement' : 'announcement'
-    )],
-    ['addOtherMembers', () => sock.groupMemberAddMode(
-      jid,
-      changes.addOtherMembers ? 'all_member_add' : 'admin_add'
-    )],
-    ['approveNewMembers', () => sock.groupJoinApprovalMode(
-      jid,
-      changes.approveNewMembers ? 'on' : 'off'
-    )]
+    ['editGroupSettings', () => wa.sock.groupSettingUpdate(jid, changes.editGroupSettings ? 'unlocked' : 'locked')],
+    ['sendNewMessages', () => wa.sock.groupSettingUpdate(jid, changes.sendNewMessages ? 'not_announcement' : 'announcement')],
+    ['addOtherMembers', () => wa.sock.groupMemberAddMode(jid, changes.addOtherMembers ? 'all_member_add' : 'admin_add')],
+    ['approveNewMembers', () => wa.sock.groupJoinApprovalMode(jid, changes.approveNewMembers ? 'on' : 'off')]
   ];
 
   for (const [key, operation] of operations) {
     if (!Object.prototype.hasOwnProperty.call(changes, key)) continue;
     try {
-      await runPermissionOperation(operation);
+      await runPermissionOperation(wa, operation);
       applied.push(key);
     } catch (e) {
       failed.push({ key, error: errText(e) });
@@ -535,110 +542,122 @@ async function applyGroupPermissionChanges(jid, changes) {
     e.permissionFailed = failed;
     throw e;
   }
-
   return applied;
 }
 
 function permissionMismatch(g, changes) {
   if (!g) return Object.keys(changes);
   const current = getGroupPermissionState(g);
-  return Object.entries(changes)
-    .filter(([key, value]) => current[key] !== value)
-    .map(([key]) => key);
+  return Object.entries(changes).filter(([key, value]) => current[key] !== value).map(([key]) => key);
 }
 
-async function verifyPermissionJob(job, ids, changes) {
-  let all = await getGroups(true);
-  let remaining = [];
+function changesNeededForGroup(g, changes) {
+  return Object.fromEntries(permissionMismatch(g, changes).map((key) => [key, changes[key]]));
+}
 
-  for (let pass = 1; pass <= PERMISSION_VERIFY_PASSES; pass++) {
-    remaining = ids.filter((id) => permissionMismatch(all[id], changes).length > 0);
-    job.verifyPass = pass;
-    job.remaining = remaining.length;
-    job.updated = Date.now();
-    if (!remaining.length) return { all, remaining: [] };
-    if (pass === PERMISSION_VERIFY_PASSES) break;
+async function verifyPermissionJob(wa, job, ids, changes) {
+  let all = await getGroups(wa, true);
+  let remaining = ids.filter((id) => permissionMismatch(all[id], changes).length > 0);
+  job.verifyPass = 1;
+  job.remaining = remaining.length;
+  job.updated = Date.now();
 
-    // Only retry groups that are actually still out of sync. This avoids
-    // re-sending successful mutations and is much cheaper than retrying the
-    // entire batch blindly.
-    for (const id of remaining) {
-      const g = all[id];
-      const pendingKeys = permissionMismatch(g, changes);
-      if (!pendingKeys.length) continue;
-      const retryChanges = Object.fromEntries(
-        pendingKeys.map((key) => [key, changes[key]])
-      );
-      try {
-        await applyGroupPermissionChanges(id, retryChanges);
-      } catch {
-        // The next verification pass decides whether anything remains.
-      }
-    }
-    all = await getGroups(true);
+  if (!remaining.length || PERMISSION_VERIFY_PASSES < 2) return { all, remaining };
+
+  job.phase = 'retrying';
+  for (const id of remaining) {
+    const retryChanges = changesNeededForGroup(all[id], changes);
+    if (!Object.keys(retryChanges).length) continue;
+    try { await applyGroupPermissionChanges(wa, id, retryChanges); } catch {}
   }
 
+  job.phase = 'verifying';
+  all = await getGroups(wa, true);
+  remaining = ids.filter((id) => permissionMismatch(all[id], changes).length > 0);
+  job.verifyPass = 2;
+  job.remaining = remaining.length;
+  job.updated = Date.now();
   return { all, remaining };
 }
 
-const stats = createStats({
-  getDb,
-  getSock: () => (state === 'connected' ? sock : null),
-  getGroupCache: () => groupCache,
-  withLimit: withWALinkLimit,
-  sleep,
-  refreshGroups: () => getGroups(true)
-});
-
-function clearReconnectTimer() {
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer);
-    reconnectTimer = null;
+function clearReconnectTimer(wa) {
+  if (wa.reconnectTimer) {
+    clearTimeout(wa.reconnectTimer);
+    wa.reconnectTimer = null;
   }
 }
 
-function scheduleWAReconnect() {
-  if (state === 'closed' || reconnectTimer || waStartPromise) return;
-  const delay = reconnectDelay;
-  reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+function scheduleWAReconnect(wa) {
+  if (wa.state === 'closed' || wa.reconnectTimer || wa.startPromise) return;
+  const delay = wa.reconnectDelay;
+  wa.reconnectDelay = Math.min(wa.reconnectDelay * 2, 30000);
 
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null;
-    startWA().catch((e) => {
-      console.error('[wa] reconnect failed:', e.message);
-      scheduleWAReconnect();
+  wa.reconnectTimer = setTimeout(() => {
+    wa.reconnectTimer = null;
+    startWA(wa.userId).catch((e) => {
+      console.error(`[wa:${wa.userId}] reconnect failed:`, e.message);
+      scheduleWAReconnect(wa);
     });
   }, delay);
 }
 
-async function clearWAAuth() {
+async function clearWAAuth(wa) {
   const d = await getDb();
-  if (d) await d.collection('auth').deleteMany({});
-  else fs.rmSync('./auth', { recursive: true, force: true });
+  if (d) {
+    await d.collection('auth').deleteMany({ ownerId: wa.userId });
+  } else {
+    fs.rmSync(userAuthPath(wa.userId), { recursive: true, force: true });
+  }
 }
 
-async function useMongoAuthState(col) {
-  const { initAuthCreds, proto, BufferJSON } = await import('@whiskeysockets/baileys');
+async function disposeWA(userId, clearAuthState = true) {
+  const wa = waSessions.get(String(userId));
+  if (!wa) {
+    if (clearAuthState) {
+      const temp = createWAContext(String(userId));
+      await clearWAAuth(temp).catch(() => {});
+    }
+    return;
+  }
 
-  async function read(key, type) {
-    const doc = await col.findOne({ _id: `${type}-${key}` });
+  clearReconnectTimer(wa);
+  const current = wa.sock;
+  wa.sock = null;
+  wa.state = 'closed';
+  wa.qrDataUrl = null;
+  wa.groupCache = { at: 0, data: null };
+  wa.codeCache.clear();
+  wa.codeInflight.clear();
+
+  if (current) {
+    try { await current.logout(); } catch {}
+    try { current.end(undefined); } catch {}
+  }
+
+  if (clearAuthState) await clearWAAuth(wa);
+  waSessions.delete(String(userId));
+}
+
+async function useMongoAuthState(col, ownerId) {
+  const { initAuthCreds, proto, BufferJSON } = await import('@whiskeysockets/baileys');
+  const key = (type, id) => ({ ownerId, _id: `${ownerId}::${type}-${id}` });
+
+  async function read(id, type) {
+    const doc = await col.findOne(key(type, id));
     if (!doc) return null;
     return JSON.parse(doc.value, BufferJSON.reviver);
   }
 
-  async function write(key, type, value) {
-    const valueString = JSON.stringify(value, BufferJSON.replacer);
+  async function write(id, type, value) {
     await col.updateOne(
-      { _id: `${type}-${key}` },
-      { $set: { value: valueString } },
+      key(type, id),
+      { $set: { ownerId, value: JSON.stringify(value, BufferJSON.replacer) } },
       { upsert: true }
     );
   }
 
-  const credsDoc = await col.findOne({ _id: 'creds' });
-  const creds = credsDoc
-    ? JSON.parse(credsDoc.value, BufferJSON.reviver)
-    : initAuthCreds();
+  const credsDoc = await col.findOne({ ownerId, _id: `${ownerId}::creds` });
+  const creds = credsDoc ? JSON.parse(credsDoc.value, BufferJSON.reviver) : initAuthCreds();
 
   return {
     state: {
@@ -658,7 +677,7 @@ async function useMongoAuthState(col) {
             Object.entries(data).flatMap(([type, entries]) =>
               Object.entries(entries).map(([id, value]) =>
                 value == null
-                  ? col.deleteOne({ _id: `${type}-${id}` })
+                  ? col.deleteOne(key(type, id))
                   : write(id, type, value)
               )
             )
@@ -668,26 +687,27 @@ async function useMongoAuthState(col) {
     },
     saveCreds: async () => {
       await col.updateOne(
-        { _id: 'creds' },
-        { $set: { value: JSON.stringify(creds, BufferJSON.replacer) } },
+        { ownerId, _id: `${ownerId}::creds` },
+        { $set: { ownerId, value: JSON.stringify(creds, BufferJSON.replacer) } },
         { upsert: true }
       );
     }
   };
 }
 
-async function startWA() {
-  if (waStartPromise) return waStartPromise;
-  clearReconnectTimer();
+async function startWA(userId) {
+  const wa = getWA(userId);
+  if (wa.startPromise) return wa.startPromise;
+  clearReconnectTimer(wa);
 
-  waStartPromise = (async () => {
-    state = 'starting';
-    qrDataUrl = null;
+  wa.startPromise = (async () => {
+    wa.state = 'starting';
+    wa.qrDataUrl = null;
 
     const d = await getDb();
     const auth = d
-      ? await useMongoAuthState(d.collection('auth'))
-      : await useMultiFileAuthState('./auth');
+      ? await useMongoAuthState(d.collection('auth'), wa.userId)
+      : await useMultiFileAuthState(userAuthPath(wa.userId));
 
     const { version } = await fetchLatestBaileysVersion();
     const currentSocket = makeWASocket({
@@ -697,60 +717,70 @@ async function startWA() {
       browser: ['Link Organizer', 'Chrome', '1.0']
     });
 
-    sock = currentSocket;
+    wa.sock = currentSocket;
     currentSocket.ev.on('creds.update', auth.saveCreds);
-    stats.attach(currentSocket);
+
+    if (!wa.statsLoaded) {
+      wa.statsLoaded = true;
+      await wa.stats.load();
+    }
+    wa.stats.attach(currentSocket);
 
     currentSocket.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
-      if (sock !== currentSocket) return;
+      if (wa.sock !== currentSocket) return;
 
       if (qr) {
-        state = 'qr';
-        qrDataUrl = await QRCode.toDataURL(qr, { width: 280, margin: 1 });
+        wa.state = 'qr';
+        wa.qrDataUrl = await QRCode.toDataURL(qr, { width: 280, margin: 1 });
       }
 
       if (connection === 'open') {
-        state = 'connected';
-        qrDataUrl = null;
-        reconnectDelay = 2000;
-        groupCache = { at: 0, data: null };
-        getGroups(true)
-          .then(() => stats.onOpen())
-          .catch((e) => console.log('[wa] group preload:', e.message));
+        wa.state = 'connected';
+        wa.qrDataUrl = null;
+        wa.reconnectDelay = 2000;
+        wa.groupCache = { at: 0, data: null };
+        getGroups(wa, true)
+          .then(() => wa.stats.onOpen())
+          .catch((e) => console.log(`[wa:${wa.userId}] group preload:`, e.message));
       }
 
       if (connection === 'close') {
-        if (sock === currentSocket) sock = null;
-        groupCache = { at: 0, data: null };
-        codeCache.clear();
-
+        if (wa.sock === currentSocket) wa.sock = null;
+        wa.groupCache = { at: 0, data: null };
+        wa.codeCache.clear();
         const code = lastDisconnect?.error?.output?.statusCode;
 
         if (code === DisconnectReason.loggedOut) {
-          state = 'closed';
-          qrDataUrl = null;
-          await clearWAAuth();
-          reconnectDelay = 2000;
-          startWA().catch((e) => console.error('[wa] fresh QR start:', e.message));
+          wa.state = 'closed';
+          wa.qrDataUrl = null;
+          await clearWAAuth(wa);
+          wa.reconnectDelay = 2000;
+          startWA(wa.userId).catch((e) => console.error(`[wa:${wa.userId}] fresh QR start:`, e.message));
         } else {
-          state = 'starting';
-          qrDataUrl = null;
-          scheduleWAReconnect();
+          wa.state = 'starting';
+          wa.qrDataUrl = null;
+          scheduleWAReconnect(wa);
         }
       }
     });
   })();
 
   try {
-    return await waStartPromise;
+    return await wa.startPromise;
   } catch (e) {
-    state = 'starting';
-    sock = null;
-    scheduleWAReconnect();
+    wa.state = 'starting';
+    wa.sock = null;
+    scheduleWAReconnect(wa);
     throw e;
   } finally {
-    waStartPromise = null;
+    wa.startPromise = null;
   }
+}
+
+const statsByUser = new Map();
+function getStats(userId) {
+  const wa = getWA(userId);
+  return wa.stats;
 }
 
 /* =========================================================
@@ -858,10 +888,14 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-const needWA = (req, res, next) =>
-  state === 'connected'
-    ? next()
-    : res.status(400).json({ error: 'WhatsApp is not connected' });
+const needWA = (req, res, next) => {
+  const wa = getWA(req.user.userId);
+  if (wa.state === 'connected' && wa.sock) return next();
+  if (!wa.startPromise && !wa.sock) {
+    startWA(wa.userId).catch((e) => console.error(`[wa:${wa.userId}] start:`, e.message));
+  }
+  return res.status(400).json({ error: 'WhatsApp is not connected' });
+};
 
 /* =========================================================
    APP
@@ -1029,6 +1063,7 @@ app.patch('/api/admin/users/:id', requireAdmin, async (req, res) => {
       for (const [sid, session] of sessions) {
         if (session.userId === id) sessions.delete(sid);
       }
+      await disposeWA(id, true);
     }
 
     res.json({ user: publicUser(user) });
@@ -1070,6 +1105,7 @@ app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
     for (const [sid, session] of sessions) {
       if (session.userId === id) sessions.delete(sid);
     }
+    await disposeWA(id, true);
 
     if (!process.env.MONGODB_URI) {
       delete appData.listsByUser[id];
@@ -1084,11 +1120,16 @@ app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
 
 /* ---------- WhatsApp status ---------- */
 
-app.get('/api/status', requireAuth, (req, res) => {
+app.get('/api/status', requireAuth, async (req, res) => {
+  const wa = getWA(req.user.userId);
+  if (!wa.startPromise && !wa.sock && wa.state !== 'qr' && wa.state !== 'connected') {
+    startWA(wa.userId).catch((e) => console.error(`[wa:${wa.userId}] start:`, e.message));
+  }
   res.json({
-    state,
-    qr: qrDataUrl,
-    canDisconnect: req.user.role === 'admin'
+    state: wa.state,
+    qr: wa.qrDataUrl,
+    canDisconnect: true,
+    owner: req.user.userId
   });
 });
 
@@ -1096,7 +1137,8 @@ app.get('/api/status', requireAuth, (req, res) => {
 
 app.get('/api/groups', requireAuth, needWA, async (req, res) => {
   try {
-    const all = await getGroups(req.query.refresh === '1');
+    const wa = getWA(req.user.userId);
+    const all = await getGroups(wa, req.query.refresh === '1');
     const groups = Object.values(all)
       .map((g) => {
         const name = (g.subject || '').trim();
@@ -1134,7 +1176,7 @@ function permissionJobPublic(job) {
   };
 }
 
-async function runPermissionJob(job, ids, changes, all) {
+async function runPermissionJob(job, ids, changes, all, wa) {
   job.state = 'running';
   job.phase = 'applying';
   job.updated = Date.now();
@@ -1164,8 +1206,17 @@ async function runPermissionJob(job, ids, changes, all) {
         continue;
       }
 
+      const groupChanges = changesNeededForGroup(g, changes);
+      if (!Object.keys(groupChanges).length) {
+        item.ok = true;
+        item.applied = [];
+        job.done++;
+        job.updated = Date.now();
+        continue;
+      }
+
       try {
-        item.applied = await applyGroupPermissionChanges(id, changes);
+        item.applied = await applyGroupPermissionChanges(wa, id, groupChanges);
       } catch (e) {
         item.applied = Array.isArray(e.permissionApplied) ? e.permissionApplied : [];
         item.failedPermissions = Array.isArray(e.permissionFailed) ? e.permissionFailed : [];
@@ -1186,7 +1237,7 @@ async function runPermissionJob(job, ids, changes, all) {
   // This is much safer than blindly repeating every mutation.
   job.phase = 'verifying';
   job.updated = Date.now();
-  const verification = await verifyPermissionJob(job, ids, changes);
+  const verification = await verifyPermissionJob(wa, job, ids, changes);
   const verifiedAll = verification.all;
 
   for (const item of job.results) {
@@ -1212,9 +1263,10 @@ async function runPermissionJob(job, ids, changes, all) {
   job.updated = Date.now();
 }
 
-app.get('/api/group-permissions', requireAdmin, needWA, async (req, res) => {
+app.get('/api/group-permissions', requireAuth, needWA, async (req, res) => {
   try {
-    const all = await getGroups(req.query.refresh === '1');
+    const wa = getWA(req.user.userId);
+    const all = await getGroups(wa, req.query.refresh === '1');
     const groups = Object.values(all)
       .map((g) => {
         const name = (g.subject || '').trim();
@@ -1241,7 +1293,7 @@ app.get('/api/group-permissions', requireAdmin, needWA, async (req, res) => {
   }
 });
 
-app.post('/api/group-permissions', requireAdmin, needWA, async (req, res) => {
+app.post('/api/group-permissions', requireAuth, needWA, async (req, res) => {
   try {
     const ids = Array.isArray(req.body?.ids)
       ? [...new Set(req.body.ids.filter((id) => typeof id === 'string' && id.trim()).map((id) => id.trim()))]
@@ -1257,9 +1309,11 @@ app.post('/api/group-permissions', requireAdmin, needWA, async (req, res) => {
       return res.status(400).json({ error: 'No supported permission changes were requested' });
     }
 
-    const all = await getGroups();
+    const wa = getWA(req.user.userId);
+    const all = await getGroups(wa);
     const job = {
       id: crypto.randomUUID(),
+      userId: req.user.userId,
       state: 'queued',
       total: ids.length,
       done: 0,
@@ -1274,7 +1328,7 @@ app.post('/api/group-permissions', requireAdmin, needWA, async (req, res) => {
       if (first) permissionJobs.delete(first);
     }
 
-    runPermissionJob(job, ids, changes, all).catch((e) => {
+    runPermissionJob(job, ids, changes, all, wa).catch((e) => {
       job.state = 'error';
       job.error = e.message;
       job.updated = Date.now();
@@ -1286,9 +1340,11 @@ app.post('/api/group-permissions', requireAdmin, needWA, async (req, res) => {
   }
 });
 
-app.get('/api/group-permission-job/:id', requireAdmin, (req, res) => {
+app.get('/api/group-permission-job/:id', requireAuth, (req, res) => {
   const job = permissionJobs.get(req.params.id);
-  if (!job) return res.status(404).json({ error: 'Permission job not found' });
+  if (!job || job.userId !== req.user.userId) {
+    return res.status(404).json({ error: 'Permission job not found' });
+  }
   res.json(permissionJobPublic(job));
 });
 
@@ -1299,29 +1355,29 @@ const isAdminErr = (m) => /not-authorized|forbidden|403/i.test(m);
 const isRateErr = (m) => /rate|overlimit|429/i.test(m);
 const jobs = new Map();
 
-async function tryCode(it, fresh = false) {
+async function tryCode(wa, it, fresh = false) {
   if (!fresh) {
-    const cached = codeInflight.has(it.id)
-      ? await codeInflight.get(it.id)
+    const cached = wa.codeInflight.has(it.id)
+      ? await wa.codeInflight.get(it.id)
       : null;
     if (cached?.code) return cached;
 
-    const local = codeCache.get(it.id);
+    const local = wa.codeCache.get(it.id);
     if (local && Date.now() - local.at < CODE_CACHE_TTL_MS) return { code: local.code };
     if (appData.codes[it.id]) return { code: appData.codes[it.id] };
   }
 
-  if (codeInflight.has(it.id)) return codeInflight.get(it.id);
+  if (wa.codeInflight.has(it.id)) return codeInflight.get(it.id);
 
-  const promise = withWALinkLimit(async () => {
+  const promise = withWALinkLimit(wa, async () => {
     try {
-      if (!sock || state !== 'connected') {
+      if (!wa.sock || wa.state !== 'connected') {
         return { err: 'WhatsApp is not connected', kind: 'other' };
       }
 
-      const code = await sock.groupInviteCode(it.id);
+      const code = await wa.sock.groupInviteCode(it.id);
       if (code) {
-        codeCache.set(it.id, { code, at: Date.now() });
+        wa.codeCache.set(it.id, { code, at: Date.now() });
         return { code };
       }
       return { err: 'empty response from WhatsApp', kind: 'other' };
@@ -1331,11 +1387,11 @@ async function tryCode(it, fresh = false) {
     }
   });
 
-  codeInflight.set(it.id, promise);
+  wa.codeInflight.set(it.id, promise);
   try {
     return await promise;
   } finally {
-    codeInflight.delete(it.id);
+    wa.codeInflight.delete(it.id);
   }
 }
 
@@ -1354,9 +1410,10 @@ const bad = (it, note) => ({
   note
 });
 
-async function runJob(job, items, fresh) {
+async function runJob(job, items, fresh, wa) {
   const out = job.results;
-  const codes = appData.codes;
+  const codes = appData.codesByUser[job.userId] || {};
+  appData.codesByUser[job.userId] = codes;
   const todo = [];
 
   items.forEach((it, i) => {
@@ -1373,10 +1430,10 @@ async function runJob(job, items, fresh) {
 
   const retry = [];
 
-  for (let s = 0; s < todo.length; s += 5) {
-    await Promise.all(todo.slice(s, s + 5).map(async (i) => {
+  for (let s = 0; s < todo.length; s += 8) {
+    await Promise.all(todo.slice(s, s + 8).map(async (i) => {
       const it = items[i];
-      const r = await tryCode(it, fresh);
+      const r = await tryCode(wa, it, fresh);
 
       if (r.code) {
         codes[it.id] = r.code;
@@ -1390,7 +1447,7 @@ async function runJob(job, items, fresh) {
       }
     }));
 
-    if (s + 5 < todo.length) await sleep(250);
+    
   }
 
   retry.sort((x, y) => x - y);
@@ -1401,7 +1458,7 @@ async function runJob(job, items, fresh) {
 
     for (let a = 1; a <= 4; a++) {
       await sleep(1200 * a);
-      r = await tryCode(it, fresh);
+      r = await tryCode(wa, it, fresh);
       if (r.code || r.kind === 'admin') break;
     }
 
@@ -1426,7 +1483,8 @@ app.post('/api/links', requireAuth, needWA, async (req, res) => {
   const { prefix = '', from, to, ids, fresh } = req.body || {};
 
   try {
-    const all = await getGroups();
+    const wa = getWA(req.user.userId);
+    const all = await getGroups(wa);
     let items = [];
 
     if (Array.isArray(ids)) {
@@ -1490,7 +1548,7 @@ app.post('/api/links', requireAuth, needWA, async (req, res) => {
 
     setTimeout(() => jobs.delete(job.id), 30 * 60 * 1000).unref?.();
 
-    runJob(job, items, !!fresh)
+    runJob(job, items, !!fresh, wa)
       .catch((e) => { job.error = 'Could not fetch links: ' + e.message; })
       .finally(() => { job.finished = true; });
 
@@ -1572,26 +1630,27 @@ app.post('/api/lists/delete', requireAuth, async (req, res) => {
   res.json({ lists });
 });
 
-/* ---------- WhatsApp disconnect: ADMIN ONLY ---------- */
+/* ---------- WhatsApp disconnect: CURRENT USER ONLY ---------- */
 
-app.post('/api/logout-wa', requireAdmin, async (req, res) => {
+app.post('/api/logout-wa', requireAuth, async (req, res) => {
+  const wa = getWA(req.user.userId);
   try {
-    clearReconnectTimer();
-
-    const current = sock;
-    sock = null;
-    state = 'closed';
-    qrDataUrl = null;
-    groupCache = { at: 0, data: null };
-    codeCache.clear();
+    clearReconnectTimer(wa);
+    const current = wa.sock;
+    wa.sock = null;
+    wa.state = 'closed';
+    wa.qrDataUrl = null;
+    wa.groupCache = { at: 0, data: null };
+    wa.codeCache.clear();
+    wa.codeInflight.clear();
 
     if (current) {
       try { await current.logout(); } catch {}
     }
 
-    await clearWAAuth();
-    reconnectDelay = 2000;
-    startWA().catch((e) => console.error('[wa] manual reconnect:', e.message));
+    await clearWAAuth(wa);
+    wa.reconnectDelay = 2000;
+    startWA(wa.userId).catch((e) => console.error(`[wa:${wa.userId}] manual reconnect:`, e.message));
 
     res.json({ ok: true });
   } catch (e) {
@@ -1601,18 +1660,17 @@ app.post('/api/logout-wa', requireAdmin, async (req, res) => {
 
 /* ---------- Live group stats ---------- */
 
-stats.routes(app, requireAuth, needWA);
+registerStatsRoutes(app, requireAuth, needWA, getStats);
 
 /* ---------- Static files ---------- */
 
 app.use(express.static('public'));
 
 await loadData();
-await stats.load();
 const admin = await ensureAdmin();
 await migrateLegacyLists(String(admin._id));
 
-startWA().catch((e) => console.error('[startup] WhatsApp:', e.message));
+// WhatsApp sessions are started lazily per authenticated user.
 
 const sessionCleanupTimer = setInterval(cleanupAuth, 10 * 60 * 1000);
 sessionCleanupTimer.unref?.();
@@ -1623,12 +1681,12 @@ const server = app.listen(PORT, () => {
 
 async function shutdown(signal) {
   console.log(`[shutdown] ${signal}`);
-  clearReconnectTimer();
+  for (const wa of waSessions.values()) clearReconnectTimer(wa);
   clearInterval(sessionCleanupTimer);
   server.close();
 
-  try { if (sock) sock.end(undefined); } catch {}
-  try { await stats.flush(); } catch {}
+  for (const wa of waSessions.values()) { try { if (wa.sock) wa.sock.end(undefined); } catch {} }
+  for (const wa of waSessions.values()) { try { await wa.stats.flush(); } catch {} }
   try { if (mongoClient) await mongoClient.close(); } catch {}
 
   process.exit(0);

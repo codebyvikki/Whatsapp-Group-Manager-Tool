@@ -234,7 +234,7 @@ async function loadGroups(force = false) {
     setStatus(true, `${state.groups.length} groups loaded`);
     renderGroups(); renderPermissions(); renderPending();
   } catch (e) {
-    if (/Login required|Admin access required/i.test(e.message)) {
+    if (/Login required/i.test(e.message)) {
       window.location.replace('/');
       return;
     }
@@ -259,7 +259,12 @@ function renderJob(job) {
   $('progressFill').style.width = `${pct}%`;
   $('progressPercent').textContent = `${pct}%`;
   if (job.state === 'done') {
-    $('progressText').textContent = `Completed & verified ${job.done} / ${job.total} groups`;
+    const failed = (job.results || []).filter((r) => !r.ok).length;
+    $('progressText').textContent = failed
+      ? `Finished ${job.done} / ${job.total} groups · ${failed} still need attention`
+      : `Completed & verified ${job.done} / ${job.total} groups`;
+  } else if (job.phase === 'retrying') {
+    $('progressText').textContent = `Retrying ${job.remaining ?? 0} groups that still need changes`;
   } else if (job.phase === 'verifying') {
     $('progressText').textContent = `Verifying WhatsApp state · ${job.remaining ?? 0} groups still need checking`;
   } else {
@@ -293,7 +298,7 @@ async function waitForJob(id) {
       renderResult(job);
       return job;
     }
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    await new Promise((resolve) => setTimeout(resolve, 250));
   }
 }
 
@@ -360,15 +365,11 @@ async function boot() {
   try {
     const me = await api('/api/me');
     if (!me.loggedIn) { window.location.replace('/'); return; }
-    if (me.user.role !== 'admin') {
-      $('loading').classList.add('hidden');
-      $('accessDenied').classList.remove('hidden');
-      return;
-    }
     $('accountName').textContent = me.user.username;
+    document.querySelector('.account-role').textContent = me.user.role === 'admin' ? 'Admin' : 'User';
     $('loading').classList.add('hidden');
     $('app').style.display = 'grid';
-    await loadGroups(true);
+    await loadGroups(false);
   } catch (e) {
     window.location.replace('/');
   }

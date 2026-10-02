@@ -283,6 +283,87 @@
     line-height: 1.6;
   }
 
+  .password-wrap {
+    position: relative;
+  }
+
+  .password-wrap input {
+    padding-right: 46px;
+  }
+
+  .password-toggle {
+    position: absolute;
+    top: 50%;
+    right: 8px;
+    transform: translateY(-50%);
+    width: 34px;
+    height: 34px;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    padding: 0;
+  }
+
+  .password-toggle:hover,
+  .password-toggle:focus-visible {
+    color: var(--brand);
+    background: var(--brand-soft);
+    outline: none;
+  }
+
+  /* Stable password eye: one fixed icon, animated slash. */
+  .password-toggle .eye-icon {
+    position: absolute;
+    inset: 0;
+    margin: auto;
+    width: 20px;
+    height: 20px;
+    overflow: visible;
+    stroke: currentColor;
+    fill: none;
+    stroke-width: 1.9;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    transform-origin: center;
+  }
+
+  .password-toggle .eye-shape {
+    transition: transform .16s ease;
+  }
+
+  .password-toggle .eye-slash {
+    stroke-dasharray: 29;
+    stroke-dashoffset: 29;
+    opacity: 0;
+    transform-origin: center;
+    transition:
+      stroke-dashoffset .18s cubic-bezier(.4,0,.2,1),
+      opacity .08s ease,
+      transform .18s cubic-bezier(.4,0,.2,1);
+  }
+
+  .password-toggle.is-visible .eye-slash {
+    stroke-dashoffset: 0;
+    opacity: 1;
+    transform: rotate(0deg) scale(1);
+  }
+
+  .password-toggle.is-visible .eye-shape {
+    transform: scale(.96);
+  }
+
+  .password-toggle:active .eye-icon {
+    transform: scale(.91);
+  }
+
+  .password-toggle:active .eye-shape {
+    transform: scale(.93);
+  }
+
   /* ---------------- Buttons ---------------- */
 
   button {
@@ -911,12 +992,29 @@
 
       <label>
         Password
-        <input
-          id="p"
-          type="password"
-          autocomplete="current-password"
-          placeholder="Enter your password"
-        >
+        <div class="password-wrap">
+          <input
+            id="p"
+            type="password"
+            autocomplete="current-password"
+            placeholder="Enter your password"
+          >
+          <button
+            type="button"
+            class="password-toggle"
+            id="togglePassword"
+            aria-label="Show password"
+            aria-pressed="false"
+          >
+            <svg class="eye-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <g class="eye-shape">
+                <path d="M2.1 12s3.5-6 9.9-6 9.9 6 9.9 6-3.5 6-9.9 6-9.9-6-9.9-6Z"></path>
+                <circle cx="12" cy="12" r="2.6"></circle>
+              </g>
+              <path class="eye-slash" d="M3.2 3.2 20.8 20.8"></path>
+            </svg>
+          </button>
+        </div>
       </label>
 
       <button id="loginBtn">
@@ -1423,7 +1521,7 @@ async function boot() {
     $('accountRole').textContent = me.user.role === 'admin' ? 'Admin' : 'User';
     $('adminLink').hidden = me.user.role !== 'admin';
     $('statsLink').hidden = false;
-    $('permissionsLink').hidden = me.user.role !== 'admin';
+    $('permissionsLink').hidden = false;
 
     poll();
 
@@ -1548,6 +1646,19 @@ async function poll() {
 
   setTimeout(poll, 3000);
 }
+
+
+$('togglePassword').onclick = () => {
+  const input = $('p');
+  const button = $('togglePassword');
+  const visible = input.type === 'text';
+
+  input.type = visible ? 'password' : 'text';
+  button.classList.toggle('is-visible', !visible);
+  button.setAttribute('aria-label', visible ? 'Show password' : 'Hide password');
+  button.setAttribute('aria-pressed', visible ? 'false' : 'true');
+  input.focus();
+};
 
 
 $('loginBtn').onclick = async () => {
@@ -2500,10 +2611,21 @@ $('dlCsv').onclick = () => {
 
 $('unlink').onclick = async () => {
 
-  await api(
-    '/api/logout-wa',
-    {}
+  const confirmed = window.confirm(
+    'Disconnect your WhatsApp? This will disconnect only your WhatsApp session for this panel account.'
   );
+  if (!confirmed) return;
+
+  $('unlink').disabled = true;
+
+  try {
+    await api(
+      '/api/logout-wa',
+      {}
+    );
+  } finally {
+    $('unlink').disabled = false;
+  }
 
 
   $('out').hidden = true;

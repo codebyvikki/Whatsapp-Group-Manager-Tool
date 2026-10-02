@@ -25,7 +25,8 @@ const trailingNum = (name) => {
 };
 
 export function createStats(ctx) {
-  const { getDb, getSock, getGroupCache, withLimit, sleep, refreshGroups } = ctx;
+  const { getDb, getSock, getGroupCache, withLimit, sleep, refreshGroups, ownerId = 'default' } = ctx;
+  const statKey = (id) => `${ownerId}::${id}`;
 
   const recs = new Map();
   const dirty = new Set();
@@ -41,10 +42,10 @@ export function createStats(ctx) {
     try {
       const d = await getDb();
       if (d) {
-        for (const doc of await d.collection('gstats').find({}).toArray()) recs.set(doc._id, doc);
+        for (const doc of await d.collection('gstats').find({ ownerId }).toArray()) recs.set(doc._id, doc);
       } else if (fs.existsSync(FILE)) {
         const j = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-        for (const r of Object.values(j)) recs.set(r._id, r);
+        for (const r of Object.values(j)) if (r.ownerId === ownerId) recs.set(r._id, r);
       }
     } catch (e) {
       console.error('[stats] load:', e.message);
@@ -75,7 +76,7 @@ export function createStats(ctx) {
   }
 
   function touch(id) {
-    dirty.add(id);
+    dirty.add(statKey(id));
     changed.add(id);
     if (!saveTimer) saveTimer = setTimeout(flush, 4000);
     if (!castTimer) castTimer = setTimeout(broadcastChanges, 400);
@@ -99,16 +100,16 @@ export function createStats(ctx) {
   /* ---------------- helpers ---------------- */
 
   function ensure(id, g) {
-    let r = recs.get(id);
+    let r = recs.get(statKey(id));
     if (!r) {
       const members = (g?.participants || []).map((p) => norm(p.id));
       r = {
-        _id: id, name: '', since: Date.now(), baseline: members.length, members,
+        _id: statKey(id), ownerId, groupId: id, name: '', since: Date.now(), baseline: members.length, members,
         events: [], req: {}, pending: null, pendingErr: null, ph: {},
         counts: { link: 0, added: 0, other: 0, left: 0, removed: 0 },
         adders: {}, approvers: {}
       };
-      recs.set(id, r);
+      recs.set(statKey(id), r);
     }
     if (g?.subject) r.name = g.subject.trim();
     return r;
@@ -351,8 +352,8 @@ export function createStats(ctx) {
     const groups = Object.values(getGroupCache().data || {});
     const idxFor = (id) => phoneIndex(id);
     for (const g of groups) {
-      const known = recs.has(g.id);
-      const r = ensure(g.id, g);
+      const known = recs.has(statKey(g.id));
+      const r = stats._t.ensure(g.id, g);
       if (known) {
         const cur = new Set(g.participants.map((p) => norm(p.id)));
         const old = new Set(r.members);
@@ -410,7 +411,7 @@ export function createStats(ctx) {
   function leaderboard() {
     const acc = new Map();
     for (const g of Object.values(getGroupCache().data || {})) {
-      const r = recs.get(g.id);
+      const r = recs.get(statKey(g.id));
       if (!r) continue;
       for (const [k, n] of Object.entries(r.adders)) {
         const e = acc.get(k) || { k, who: shown(r, k), n: 0, groups: [] };
@@ -440,7 +441,7 @@ export function createStats(ctx) {
 
   function buildExport(tab, scope, ids) {
     const rows = sortedRows(ids);
-    const idxOf = (id) => recs.get(id);
+    const idxOf = (id) => recs.get(statKey(id));
     const head = [], lines = [];
 
     if (scope === 'summary') {
@@ -527,39 +528,56 @@ export function createStats(ctx) {
 
   /* ---------------- routes ---------------- */
 
-  function routes(app, requireAuth, needWA) {
+  
+  setInterval(() => { if (getSock()) refreshAll().catch(() => {}); }, 10 * 60 * 1000).unref?.();
+
+  return { load, attach, onOpen, flush, _t: { onParticipants, onJoinRequest, summary, renderExport, recs, statKey, ensure, getGroupCache, clients, refresh, refreshAll, sortedRows, leaderboard } };
+}
+
+
+export function registerStatsRoutes(app, requireAuth, needWA, getStats) {
     app.get('/api/stats/overview', requireAuth, needWA, (req, res) => {
-      const currentRows = sortedRows();
+      const stats = getStats(req.user.userId);
+      const rows = stats._t.sortedRows();
+      const rf = stats._t.refresh;
       res.json({
-        rows: currentRows,
-        leaderboard: leaderboard(),
-        refresh,
-        groupCount: currentRows.length,
-        lastSync: refresh.at || null,
+        rows,
+        leaderboard: stats._t.leaderboard(),
+        refresh: rf,
+        groupCount: rows.length,
+        lastSync: rf.at || null,
         tz: TZ,
         now: Date.now()
       });
     });
 
     app.post('/api/stats/refresh', requireAuth, needWA, (req, res) => {
-      refreshAll(true).catch((e) => console.error('[stats] refresh:', e.message));
-      res.json({ refresh });
+      const stats = getStats(req.user.userId);
+      stats._t.refreshAll(true).catch((e) => console.error('[stats] refresh:', e.message));
+      res.json({ refresh: stats._t.refresh });
     });
 
     app.get('/api/stats/group/:id', requireAuth, needWA, (req, res) => {
-      const g = getGroupCache().data?.[req.params.id];
+      const stats = getStats(req.user.userId);
+      const g = stats._t.getGroupCache().data?.[req.params.id];
       if (!g) return res.status(404).json({ error: 'Group not found' });
-      const r = ensure(g.id, g);
+      const r = stats._t.ensure(g.id, g);
       res.json({
-        row: summary(g),
-        pending: (r.pending?.rows || []).map((x) => ({ who: x.ph ? `+${x.ph}` : `ID ${x.p}`, method: x.m, at: x.t, by: x.m === 'non_admin_add' ? shown(r, x.by) : '' })),
+        row: stats._t.summary(g),
+        pending: (r.pending?.rows || []).map((x) => ({
+          who: x.ph ? `+${x.ph}` : `ID ${x.p}`,
+          method: x.m,
+          at: x.t,
+          by: x.m === 'non_admin_add' ? (x.by ? `ID ${x.by}` : '') : ''
+        })),
         recent: r.events.slice(-60).reverse().map((e) => ({
-          at: e.t, kind: e.k, who: shown(r, e.p), by: shown(r, e.a || e.by), method: e.m
+          at: e.t, kind: e.k, who: e.p ? `ID ${e.p}` : '', by: e.a || e.by ? `ID ${e.a || e.by}` : '', method: e.m
         }))
       });
     });
 
     app.get('/api/stats/stream', requireAuth, (req, res) => {
+      const stats = getStats(req.user.userId);
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache, no-transform',
@@ -567,9 +585,9 @@ export function createStats(ctx) {
         'X-Accel-Buffering': 'no'
       });
       res.write('retry: 3000\n\n');
-      clients.add(res);
+      stats._t.clients.add(res);
       const beat = setInterval(() => { try { res.write(': hb\n\n'); } catch {} }, 25000);
-      req.on('close', () => { clearInterval(beat); clients.delete(res); });
+      req.on('close', () => { clearInterval(beat); stats._t.clients.delete(res); });
     });
 
     const exporter = (req, res) => {
@@ -578,7 +596,8 @@ export function createStats(ctx) {
       const scope = q.scope === 'detail' ? 'detail' : 'summary';
       const format = q.format === 'txt' ? 'txt' : 'csv';
       const ids = (Array.isArray(q.ids) ? q.ids : String(q.ids || '').split(',')).map((x) => String(x).trim()).filter(Boolean);
-      const out = renderExport(tab, scope, format, ids);
+      const stats = getStats(req.user.userId);
+      const out = stats._t.renderExport(tab, scope, format, ids);
       res.setHeader('Content-Type', out.type);
       res.setHeader('Content-Disposition', `attachment; filename="${out.name}"`);
       res.send(out.body);
@@ -587,7 +606,3 @@ export function createStats(ctx) {
     app.post('/api/stats/export', requireAuth, needWA, exporter);
   }
 
-  setInterval(() => { if (getSock()) refreshAll().catch(() => {}); }, 10 * 60 * 1000).unref?.();
-
-  return { load, attach, onOpen, routes, flush, _t: { onParticipants, onJoinRequest, summary, renderExport, recs } };
-}
