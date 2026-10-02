@@ -1425,6 +1425,312 @@ app.get('/api/group-permission-job/:id', requireAuth, (req, res) => {
   res.json(permissionJobPublic(job));
 });
 
+/* ---------- Group name manager ---------- */
+
+// Group renaming is intentionally isolated from the Link Organizer, Stats and
+// Permissions workers.  It reuses the already-connected WhatsApp socket and
+// existing group cache so adding this feature does not add another connection
+// or a permanent background workload.
+const GROUP_NAME_MAX = Math.max(1, Math.min(1000, Number(process.env.GROUP_NAME_MAX || 200)));
+const GROUP_NAME_DELAY_MS = Math.max(250, Number(process.env.GROUP_NAME_DELAY_MS || 500));
+const GROUP_NAME_RETRIES = Math.max(0, Math.min(4, Number(process.env.GROUP_NAME_RETRIES || 3)));
+const groupNameJobs = new Map();
+
+function groupNamePublic(job) {
+  return {
+    id: job.id,
+    state: job.state,
+    phase: job.phase,
+    total: job.total,
+    done: job.done,
+    updated: job.updated,
+    results: job.results,
+    error: job.error || null
+  };
+}
+
+function cleanGroupName(value) {
+  return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function trailingGroupNumber(name) {
+  const m = cleanGroupName(name).match(/(\d+)\s*$/);
+  return m ? Number(m[1]) : null;
+}
+
+function normalizeGroupIds(ids) {
+  return [...new Set(
+    (Array.isArray(ids) ? ids : [])
+      .filter((id) => typeof id === 'string' && id.trim())
+      .map((id) => id.trim())
+  )];
+}
+
+function formatGroupNumber(value, digits) {
+  const n = Number(value);
+  const d = Number(digits) || 0;
+  return d > 0 ? String(n).padStart(d, '0') : String(n);
+}
+
+function makeTargetName(prefix, number, separator = ' ', digits = 0) {
+  const p = cleanGroupName(prefix);
+  const n = formatGroupNumber(number, digits);
+  return `${p}${separator}${n}`.trim();
+}
+
+function exactRangeGroups(groups, prefix, from, to) {
+  const p = cleanGroupName(prefix);
+  const a = Number(from);
+  const b = Number(to);
+  if (!p) throw new Error('Enter the existing group prefix.');
+  if (!Number.isInteger(a) || !Number.isInteger(b) || a > b) throw new Error('Enter a valid existing start and end number.');
+  if (b - a + 1 > 1000) throw new Error('Please use a range of 1000 groups or less.');
+
+  return groups.filter((g) => {
+    const name = cleanGroupName(g.name);
+    const m = name.match(/^(.*?)(\d+)\s*$/);
+    if (!m) return false;
+    return m[1].trimEnd() === p && Number(m[2]) >= a && Number(m[2]) <= b;
+  });
+}
+
+function buildGroupNamePlan(all, input) {
+  const groups = Object.values(all || {})
+    .map((g) => ({
+      id: g.id,
+      name: cleanGroupName(g.subject || ''),
+      num: trailingGroupNumber(g.subject || ''),
+      size: g.size ?? g.participants?.length ?? 0
+    }))
+    .sort((a, b) => ((a.num ?? Infinity) - (b.num ?? Infinity)) || a.name.localeCompare(b.name));
+
+  const mode = ['range', 'select', 'list'].includes(input?.mode) ? input.mode : 'select';
+  let selected;
+  let names;
+
+  if (mode === 'range') {
+    const ids = normalizeGroupIds(input?.ids);
+    const byId = new Map(groups.map((g) => [g.id, g]));
+
+    if (ids.length) {
+      selected = ids.map((id) => byId.get(id)).filter(Boolean);
+      if (!selected.length) throw new Error('No valid groups selected. Refresh groups and try again.');
+    } else {
+      selected = exactRangeGroups(groups, input?.currentPrefix, input?.currentFrom, input?.currentTo);
+    }
+
+    const currentPrefix = cleanGroupName(input?.currentPrefix);
+    if (currentPrefix && Number.isInteger(Number(input?.currentFrom)) && Number.isInteger(Number(input?.currentTo))) {
+      const allowed = new Set(exactRangeGroups(groups, currentPrefix, input.currentFrom, input.currentTo).map((g) => g.id));
+      selected = selected.filter((g) => allowed.has(g.id));
+    }
+
+    if (!selected.length) throw new Error('No groups matched the existing prefix and number range.');
+    const prefix = cleanGroupName(input?.prefix);
+    const start = Number(input?.startNumber);
+    const step = Number(input?.step || 1);
+    const separator = typeof input?.separator === 'string' ? input.separator : ' ';
+    const digits = Number(input?.digits || 0);
+    if (!prefix) throw new Error('Enter the new group prefix.');
+    if (!Number.isInteger(start)) throw new Error('Enter a valid new starting number.');
+    if (!Number.isInteger(step) || step < 1) throw new Error('Step must be a positive number.');
+    if (![0,2,3,4].includes(digits)) throw new Error('Invalid number format.');
+    names = selected.map((_, i) => makeTargetName(prefix, start + i * step, separator, digits));
+  } else {
+    const ids = normalizeGroupIds(input?.ids);
+    const byId = new Map(groups.map((g) => [g.id, g]));
+    selected = ids.map((id) => byId.get(id)).filter(Boolean);
+    if (!selected.length) throw new Error('No valid groups selected.');
+
+    if (mode === 'list') {
+      names = String(input?.names || '').split(/\r?\n/).map(cleanGroupName);
+      while (names.length && !names[names.length - 1]) names.pop();
+      if (names.length !== selected.length) throw new Error(`Provide exactly ${selected.length} names for ${selected.length} selected groups.`);
+    } else {
+      const prefix = cleanGroupName(input?.prefix);
+      const start = Number(input?.startNumber);
+      const step = Number(input?.step || 1);
+      const separator = typeof input?.separator === 'string' ? input.separator : ' ';
+      const digits = Number(input?.digits || 0);
+      if (!prefix) throw new Error('Enter the new group prefix.');
+      if (!Number.isInteger(start)) throw new Error('Enter a valid starting number.');
+      if (!Number.isInteger(step) || step < 1) throw new Error('Step must be a positive number.');
+      if (![0,2,3,4].includes(digits)) throw new Error('Invalid number format.');
+      names = selected.map((_, i) => makeTargetName(prefix, start + i * step, separator, digits));
+    }
+  }
+
+  // Preserve the user's selection order for Select/Name List. Range mode is
+  // sorted by the actual existing numeric suffix so numbering is predictable.
+  if (mode === 'range') {
+    selected = [...selected].sort((a, b) => ((a.num ?? Infinity) - (b.num ?? Infinity)) || a.name.localeCompare(b.name));
+    const prefix = cleanGroupName(input?.prefix);
+    const start = Number(input?.startNumber);
+    const step = Number(input?.step || 1);
+    const separator = typeof input?.separator === 'string' ? input.separator : ' ';
+    const digits = Number(input?.digits || 0);
+    names = selected.map((_, i) => makeTargetName(prefix, start + i * step, separator, digits));
+  }
+
+  if (selected.length > GROUP_NAME_MAX) {
+    throw new Error(`Please select no more than ${GROUP_NAME_MAX} groups at once.`);
+  }
+
+  const seen = new Set();
+  for (const name of names) {
+    if (!name || name.length > 100) throw new Error('Every group name must be between 1 and 100 characters.');
+    const key = name.toLocaleLowerCase();
+    if (seen.has(key)) throw new Error(`Duplicate target name: ${name}`);
+    seen.add(key);
+  }
+
+  const selectedIds = new Set(selected.map((g) => g.id));
+  const existing = new Set(groups.filter((g) => !selectedIds.has(g.id)).map((g) => g.name.toLocaleLowerCase()));
+  const conflict = names.find((name) => existing.has(name.toLocaleLowerCase()));
+  if (conflict) throw new Error(`Target name already exists: ${conflict}`);
+
+  return {
+    mode,
+    plan: selected.map((g, i) => ({ id: g.id, oldName: g.name, newName: names[i] }))
+  };
+}
+
+function isGroupNameRateError(error) {
+  return /rate|overlimit|429|too many|temporar/i.test(errText(error));
+}
+
+function isGroupNameAdminError(error) {
+  return /not-authorized|forbidden|403|not admin|not an admin/i.test(errText(error));
+}
+
+function sleepMs(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function renameOneGroup(wa, item) {
+  let last = null;
+  for (let attempt = 0; attempt <= GROUP_NAME_RETRIES; attempt++) {
+    try {
+      if (!wa.sock || wa.state !== 'connected') throw new Error('WhatsApp is not connected');
+      await wa.sock.groupUpdateSubject(item.id, item.newName);
+      const g = wa.groupCache.data?.[item.id];
+      if (g) g.subject = item.newName;
+      return { ok: true };
+    } catch (e) {
+      last = e;
+      if (!isGroupNameRateError(e) || attempt >= GROUP_NAME_RETRIES || isGroupNameAdminError(e)) break;
+      await sleepMs(1500 * (attempt + 1));
+    }
+  }
+  return { ok: false, error: errText(last || 'Rename failed') };
+}
+
+async function runGroupNameJob(job, plan, wa) {
+  job.state = 'running';
+  job.phase = 'renaming';
+  job.updated = Date.now();
+  job.results = plan.map((x) => ({ ...x, ok: null, error: null }));
+
+  // One mutation at a time is deliberate: concurrent subject updates are a
+  // common cause of WhatsApp rate-overlimit responses. A small cooldown keeps
+  // the worker fast for normal batches while avoiding bursty traffic.
+  for (let i = 0; i < job.results.length; i++) {
+    const item = job.results[i];
+    if (item.oldName === item.newName) {
+      item.ok = true;
+      item.error = null;
+    } else {
+      const result = await renameOneGroup(wa, item);
+      item.ok = result.ok;
+      item.error = result.ok ? null : result.error;
+      if (!result.ok && isGroupNameRateError(result.error)) job.phase = 'retrying';
+    }
+    job.done++;
+    job.updated = Date.now();
+    if (i + 1 < job.results.length) await sleepMs(GROUP_NAME_DELAY_MS);
+    job.phase = 'renaming';
+  }
+
+  job.phase = 'done';
+  job.state = 'done';
+  job.updated = Date.now();
+}
+
+app.get('/api/group-names', requireAuth, needWA, async (req, res) => {
+  try {
+    const wa = getWA(req.user.userId);
+    const all = await getGroups(wa, req.query.refresh === '1');
+    const groups = Object.values(all)
+      .map((g) => {
+        const name = cleanGroupName(g.subject || '');
+        return { id: g.id, name, num: trailingGroupNumber(name), size: g.size ?? g.participants?.length ?? 0 };
+      })
+      .sort((a, b) => ((a.num ?? Infinity) - (b.num ?? Infinity)) || a.name.localeCompare(b.name));
+    res.json({ groups, maxGroups: GROUP_NAME_MAX });
+  } catch (e) {
+    res.status(500).json({ error: 'Could not load groups: ' + e.message });
+  }
+});
+
+app.post('/api/group-names/preview', requireAuth, needWA, async (req, res) => {
+  try {
+    const wa = getWA(req.user.userId);
+    const all = await getGroups(wa);
+    const { mode, plan } = buildGroupNamePlan(all, req.body || {});
+    res.json({ ok: true, mode, total: plan.length, plan });
+  } catch (e) {
+    res.status(400).json({ error: e.message || 'Could not build rename preview' });
+  }
+});
+
+app.post('/api/group-names', requireAuth, needWA, async (req, res) => {
+  try {
+    const wa = getWA(req.user.userId);
+    const all = await getGroups(wa);
+    const { mode, plan } = buildGroupNamePlan(all, req.body || {});
+    if (!plan.length) return res.status(400).json({ error: 'No groups matched the request.' });
+
+    const job = {
+      id: crypto.randomUUID(),
+      userId: req.user.userId,
+      state: 'queued',
+      phase: 'queued',
+      total: plan.length,
+      done: 0,
+      updated: Date.now(),
+      results: [],
+      error: null,
+      mode
+    };
+
+    groupNameJobs.set(job.id, job);
+    while (groupNameJobs.size > 30) {
+      const first = groupNameJobs.keys().next().value;
+      if (!first) break;
+      groupNameJobs.delete(first);
+    }
+
+    runGroupNameJob(job, plan, wa).catch((e) => {
+      job.state = 'error';
+      job.phase = 'error';
+      job.error = e.message;
+      job.updated = Date.now();
+    });
+
+    res.json({ ok: true, job: groupNamePublic(job) });
+  } catch (e) {
+    res.status(400).json({ error: e.message || 'Could not start group rename' });
+  }
+});
+
+app.get('/api/group-name-job/:id', requireAuth, (req, res) => {
+  const job = groupNameJobs.get(req.params.id);
+  if (!job || job.userId !== req.user.userId) {
+    return res.status(404).json({ error: 'Group name job not found' });
+  }
+  res.json(groupNamePublic(job));
+});
+
 /* ---------- Link jobs ---------- */
 
 const errText = (e) => String(e?.message || e?.data || e || 'unknown error');

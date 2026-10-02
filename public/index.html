@@ -1108,6 +1108,14 @@
 
       <a
         class="ghost header-btn"
+        id="groupNamesLink"
+        href="/group-names.html"
+        hidden
+        style="text-decoration:none;display:inline-flex;align-items:center;"
+      >Group Names</a>
+
+      <a
+        class="ghost header-btn"
         id="adminLink"
         href="/admin.html"
         hidden
@@ -1666,6 +1674,7 @@ async function boot() {
       $('accountBar').hidden = true;
       $('adminLink').hidden = true;
       $('permissionsLink').hidden = true;
+      $('groupNamesLink').hidden = true;
       $('logoutBtn').hidden = true;
 
       updateHeaderStatus(false);
@@ -1682,6 +1691,7 @@ async function boot() {
     $('adminLink').hidden = me.user.role !== 'admin';
     $('statsLink').hidden = false;
     $('permissionsLink').hidden = false;
+    $('groupNamesLink').hidden = false;
 
     poll();
 
