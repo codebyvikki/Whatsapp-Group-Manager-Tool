@@ -1676,7 +1676,7 @@ const sessionCleanupTimer = setInterval(cleanupAuth, 10 * 60 * 1000);
 sessionCleanupTimer.unref?.();
 
 const server = app.listen(PORT, () => {
-  console.log(`Group Link Organizer running on port ${PORT}`);
+  console.log(`WhatsApp Group Manager running on port ${PORT}`);
 });
 
 async function shutdown(signal) {

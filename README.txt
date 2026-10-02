@@ -1,4 +1,4 @@
-# Group Link Organizer — Multi-user
+# WhatsApp Group Manager — Multi-user
 
 ## Access model
 

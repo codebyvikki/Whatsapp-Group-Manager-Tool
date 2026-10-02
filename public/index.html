@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Group Link Organizer</title>
+<title>WhatsApp Group Manager</title>
 
 <style>
   :root {
@@ -136,14 +136,15 @@
   }
 
   .brand-icon {
-    width: 44px;
-    height: 44px;
+    width: 50px;
+    height: 50px;
+    flex: 0 0 50px;
     display: grid;
     place-items: center;
-    border-radius: 12px;
+    border-radius: 14px;
     background: var(--brand);
     color: #fff;
-    font-size: 20px;
+    font-size: 22px;
     font-weight: 800;
     box-shadow: 0 6px 18px rgba(18,140,85,.22);
   }
@@ -291,78 +292,198 @@
     padding-right: 46px;
   }
 
-  .password-toggle {
-    position: absolute;
-    top: 50%;
-    right: 8px;
-    transform: translateY(-50%);
-    width: 34px;
-    height: 34px;
-    display: grid;
-    place-items: center;
-    border: 0;
-    border-radius: 8px;
-    background: transparent;
-    color: var(--muted);
-    cursor: pointer;
-    padding: 0;
-  }
+/* ==================== STABLE PASSWORD EYE ==================== */
 
-  .password-toggle:hover,
-  .password-toggle:focus-visible {
-    color: var(--brand);
-    background: var(--brand-soft);
-    outline: none;
-  }
+.password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 8px;
 
-  /* Stable password eye: one fixed icon, animated slash. */
-  .password-toggle .eye-icon {
-    position: absolute;
-    inset: 0;
-    margin: auto;
-    width: 20px;
-    height: 20px;
-    overflow: visible;
-    stroke: currentColor;
-    fill: none;
-    stroke-width: 1.9;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-    transform-origin: center;
-  }
+  width: 34px;
+  height: 34px;
 
-  .password-toggle .eye-shape {
-    transition: transform .16s ease;
-  }
+  display: grid;
+  place-items: center;
 
-  .password-toggle .eye-slash {
-    stroke-dasharray: 29;
-    stroke-dashoffset: 29;
-    opacity: 0;
-    transform-origin: center;
-    transition:
-      stroke-dashoffset .18s cubic-bezier(.4,0,.2,1),
-      opacity .08s ease,
-      transform .18s cubic-bezier(.4,0,.2,1);
-  }
+  margin: 0;
+  padding: 0;
 
-  .password-toggle.is-visible .eye-slash {
-    stroke-dashoffset: 0;
-    opacity: 1;
-    transform: rotate(0deg) scale(1);
-  }
+  border: 1px solid transparent;
+  border-radius: 8px;
 
-  .password-toggle.is-visible .eye-shape {
-    transform: scale(.96);
-  }
+  background: transparent;
+  color: var(--muted);
 
-  .password-toggle:active .eye-icon {
-    transform: scale(.91);
-  }
+  cursor: pointer;
 
-  .password-toggle:active .eye-shape {
-    transform: scale(.93);
-  }
+  /* Completely fixed position */
+  transform: translateY(-50%) !important;
+
+  /* No movement animation */
+  transition:
+    color .15s ease,
+    border-color .15s ease !important;
+
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+
+  /* Prevent browser press movement */
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+/* ==================== HOVER ==================== */
+
+.password-toggle:hover:not(:disabled) {
+  color: var(--brand);
+  background: transparent;
+
+  border-color: rgba(18, 140, 85, .55);
+
+  /* Small edge glow only */
+  box-shadow: 0 0 0 1px rgba(18, 140, 85, .08);
+
+  transform: translateY(-50%) !important;
+}
+
+/* ==================== FOCUS ==================== */
+
+.password-toggle:focus,
+.password-toggle:focus-visible {
+  color: var(--brand);
+  background: transparent;
+
+  border-color: rgba(18, 140, 85, .55);
+
+  box-shadow: 0 0 0 1px rgba(18, 140, 85, .08);
+
+  outline: none;
+
+  transform: translateY(-50%) !important;
+}
+
+/* ==================== VISIBLE STATE ==================== */
+/*
+   IMPORTANT:
+   No box-shadow here.
+   No background.
+   No permanent glow.
+*/
+
+.password-toggle.is-visible {
+  color: var(--brand);
+  background: transparent;
+
+  border-color: transparent;
+
+  box-shadow: none;
+
+  transform: translateY(-50%) !important;
+}
+
+/* ==================== VISIBLE + HOVER ==================== */
+
+.password-toggle.is-visible:hover:not(:disabled) {
+  color: var(--brand);
+  background: transparent;
+
+  border-color: rgba(18, 140, 85, .55);
+
+  box-shadow: 0 0 0 1px rgba(18, 140, 85, .08);
+
+  transform: translateY(-50%) !important;
+}
+
+/* ==================== EYE ICON ==================== */
+
+.password-toggle .eye-icon {
+  position: absolute;
+  inset: 0;
+
+  width: 20px;
+  height: 20px;
+
+  margin: auto;
+
+  overflow: visible;
+
+  stroke: currentColor;
+  fill: none;
+
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+
+  /* Absolutely stable */
+  transform: none !important;
+  transition: none !important;
+}
+
+.password-toggle .eye-shape {
+  transform: none !important;
+  transition: none !important;
+}
+
+/* ==================== SLASH ==================== */
+
+.password-toggle .eye-slash {
+  stroke-dasharray: none;
+  stroke-dashoffset: 0;
+
+  opacity: 0;
+
+  transform: none !important;
+  transition: none !important;
+}
+
+/* Cross appears instantly */
+.password-toggle.is-visible .eye-slash {
+  opacity: 1;
+}
+
+/* ==================== EYE ACTIVE STATE ==================== */
+/*
+   Only the eye can have a tiny glow.
+   The surrounding box NEVER glows because of .is-visible.
+*/
+
+.password-toggle.is-visible .eye-icon {
+  filter: drop-shadow(
+    0 0 3px rgba(18, 140, 85, .35)
+  );
+}
+
+/* ==================== CLICK / PRESS ==================== */
+/*
+   Override global button:active transform.
+   The eye button NEVER moves down.
+*/
+
+.password-toggle:active,
+.password-toggle:active:not(:disabled) {
+  transform: translateY(-50%) !important;
+
+  background: transparent !important;
+}
+
+/* Remove any global button shadow during click */
+.password-toggle:active:not(:disabled) {
+  box-shadow: none !important;
+}
+
+/* Keep SVG completely fixed */
+.password-toggle:active .eye-icon,
+.password-toggle:active .eye-shape,
+.password-toggle:active .eye-slash {
+  transform: none !important;
+  transition: none !important;
+}
+
+/* ==================== DISABLED ==================== */
+
+.password-toggle:disabled {
+  transform: translateY(-50%) !important;
+}
 
   /* ---------------- Buttons ---------------- */
 
@@ -388,6 +509,45 @@
 
   button:active:not(:disabled) {
     transform: translateY(1px);
+  }
+
+  /* Password eye button */
+  button.password-toggle {
+      background: transparent !important;
+      border: 1px solid transparent !important;
+      box-shadow: none !important;
+      outline: none !important;
+      transform: translateY(-50%);
+  }
+
+  /* Only when cursor is actually over the eye */
+  button.password-toggle:hover {
+      background: rgba(18, 140, 85, 0.08) !important;
+      border-color: rgba(18, 140, 85, 0.45) !important;
+      box-shadow: none !important;
+      transform: translateY(-50%);
+  }
+
+  /* Never keep the box because of focus/click */
+  button.password-toggle:focus,
+  button.password-toggle:focus-visible,
+  button.password-toggle:active,
+  button.password-toggle:active:not(:disabled) {
+      background: transparent !important;
+      border-color: transparent !important;
+      box-shadow: none !important;
+      outline: none !important;
+      transform: translateY(-50%);
+  }
+
+  /* When hovering after focus, show the box again */
+  button.password-toggle:hover:focus,
+  button.password-toggle:hover:focus-visible {
+      background: rgba(18, 140, 85, 0.08) !important;
+      border-color: rgba(18, 140, 85, 0.45) !important;
+      box-shadow: none !important;
+      outline: none !important;
+      transform: translateY(-50%);
   }
 
   button.ghost {
@@ -915,11 +1075,11 @@
 
   <header class="app-header">
     <div class="brand">
-      <div class="brand-icon">GL</div>
+      <div class="brand-icon">WG</div>
 
       <div class="brand-text">
-        <h1>Group Link Organizer</h1>
-        <p>Manage, organize and export your group links</p>
+        <h1>WhatsApp Group Manager</h1>
+        <p>Manage groups, links, permissions and stats</p>
       </div>
     </div>
 
@@ -1647,17 +1807,27 @@ async function poll() {
   setTimeout(poll, 3000);
 }
 
+$('togglePassword').onclick = (e) => {
+  e.preventDefault();
 
-$('togglePassword').onclick = () => {
   const input = $('p');
   const button = $('togglePassword');
-  const visible = input.type === 'text';
 
-  input.type = visible ? 'password' : 'text';
-  button.classList.toggle('is-visible', !visible);
-  button.setAttribute('aria-label', visible ? 'Show password' : 'Hide password');
-  button.setAttribute('aria-pressed', visible ? 'false' : 'true');
-  input.focus();
+  const willShow = input.type === 'password';
+
+  input.type = willShow ? 'text' : 'password';
+
+  button.classList.toggle('is-visible', willShow);
+
+  button.setAttribute(
+    'aria-label',
+    willShow ? 'Hide password' : 'Show password'
+  );
+
+  button.setAttribute(
+    'aria-pressed',
+    willShow ? 'true' : 'false'
+  );
 };
 
 

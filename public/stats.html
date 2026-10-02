@@ -136,14 +136,15 @@
   }
 
   .brand-icon {
-    width: 44px;
-    height: 44px;
+    width: 50px;
+    height: 50px;
+    flex: 0 0 50px;
     display: grid;
     place-items: center;
-    border-radius: 12px;
+    border-radius: 14px;
     background: var(--brand);
     color: #fff;
-    font-size: 20px;
+    font-size: 22px;
     font-weight: 800;
     box-shadow: 0 6px 18px rgba(18,140,85,.22);
   }
@@ -544,22 +545,22 @@
 
   <header class="app-header">
     <div class="brand">
-      <div class="brand-icon">GL</div>
+      <div class="brand-icon">WG</div>
       <div class="brand-text">
         <h1>Live Group Stats</h1>
         <p>Pending, invite-link joins, added members and totals</p>
       </div>
     </div>
     <div class="account-bar">
-      <a class="ghost header-btn" href="/">Link Organizer</a>
+      <a class="ghost header-btn" href="/">WhatsApp Group Manager</a>
       <div class="status" id="live"><span class="status-dot"></span><span id="liveText">Connecting</span></div>
     </div>
   </header>
 
   <section id="blocked" hidden>
     <h2 class="section-title">WhatsApp is not connected</h2>
-    <p class="section-description">Open the Link Organizer, scan the QR code, then come back here. Stats start tracking automatically after connecting.</p>
-    <div><a class="ghost header-btn" href="/">Go to Link Organizer</a></div>
+    <p class="section-description">Open WhatsApp Group Manager, scan the QR code, then come back here. Stats start tracking automatically after connecting.</p>
+    <div><a class="ghost header-btn" href="/">Go to WhatsApp Group Manager</a></div>
   </section>
 
   <section id="app" hidden>
