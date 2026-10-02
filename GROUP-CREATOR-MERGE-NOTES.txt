@@ -1,0 +1,31 @@
+GROUP CREATOR MERGE
+===================
+
+The existing WhatsApp Group Manager project remains the base application.
+The Group Creator functionality is integrated directly into server.js and
+uses the currently authenticated user's existing WhatsApp socket.
+
+Current structure:
+- Group Creator backend logic/routes are already merged into server.js.
+- public/group-creator.html is the Group Creator UI.
+- The old standalone group-creator.js duplicate was removed because it was
+  not imported or used by the running server.
+- The old dashboard-group-creator-card.html snippet was removed because
+  the Group Creator card is already present in public/dashboard.html.
+- stats.js remains separate because Live Group Stats is an independent
+  server module.
+- group-names.js and permissions.js remain separate because they are the
+  front-end logic modules for their respective tools.
+
+UI update in this build:
+- Group Creator Dashboard button now matches Link Organizer's Dashboard
+  button styling.
+- Group Creator WhatsApp status now uses the same Connected/Disconnected
+  text-only status and green/red pulse-dot animation as Link Organizer.
+- Connecting/QR is intentionally represented as Disconnected on this tool,
+  while QR handling remains on Dashboard.
+
+No Group Creator business logic or existing tool functionality was changed.
+The clean source archive intentionally excludes .env, runtime data.json,
+node_modules, and other local secrets/state. Keep your existing .env and
+local runtime data separately when needed.

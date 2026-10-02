@@ -1,0 +1,19 @@
+IMPORTANT - CLEAN INSTALL
+
+This project archive intentionally does NOT include node_modules.
+The previous archive contained an incomplete/corrupt MongoDB package inside node_modules, which caused:
+Cannot find module './cmap/auth/mongo_credentials'
+
+Do this after extracting:
+
+1. Copy your existing .env file from your previous project folder into this folder.
+2. Open PowerShell in this folder.
+3. Run:
+   npm install
+4. Then run:
+   npm start
+
+OR double-click FIX-INSTALL-WINDOWS.bat. It removes any old node_modules, installs fresh dependencies, and starts the app.
+
+Recommended Node.js: 22.x (matches package.json).
+Do NOT copy the old node_modules folder into this project.

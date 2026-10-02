@@ -2,6 +2,18 @@ import express from 'express';
 import crypto from 'crypto';
 import QRCode from 'qrcode';
 import pino from 'pino';
+let sharpModule = null;
+
+async function getSharp() {
+  if (sharpModule) return sharpModule;
+  try {
+    const mod = await import('sharp');
+    sharpModule = mod.default || mod;
+    return sharpModule;
+  } catch {
+    throw new Error('Image processing is not installed. Run npm install and try again.');
+  }
+}
 import fs from 'fs';
 import { MongoClient } from 'mongodb';
 import { createStats, registerStatsRoutes } from './stats.js';
@@ -24,6 +36,13 @@ const PERMISSION_RETRY_BASE_MS = Math.max(400, Number(process.env.PERMISSION_RET
 const PERMISSION_MAX_ATTEMPTS = Math.max(5, Number(process.env.PERMISSION_MAX_ATTEMPTS || 7));
 const PERMISSION_VERIFY_PASSES = Math.min(2, Math.max(1, Number(process.env.PERMISSION_VERIFY_PASSES || 2)));
 const PERMISSION_GLOBAL_CONCURRENCY = Math.min(3, Math.max(1, Number(process.env.PERMISSION_GLOBAL_CONCURRENCY || 3)));
+const MAX_DP_GROUPS = Math.max(1, Number(process.env.MAX_DP_GROUPS || 500));
+const DP_START_GAP_MS = Math.max(700, Number(process.env.DP_START_GAP_MS || 1200));
+const DP_IMAGE_MAX_BYTES = Math.max(256 * 1024, Number(process.env.DP_IMAGE_MAX_BYTES || 8 * 1024 * 1024));
+const DP_IMAGE_TTL_MS = 15 * 60 * 1000;
+const DP_JOB_TTL_MS = 30 * 60 * 1000;
+const dpImages = new Map();
+const dpJobs = new Map();
 let permissionNextAllowedAt = 0;
 let permissionCooldownUntil = 0;
 let permissionAdaptiveGapMs = PERMISSION_START_GAP_MS;
@@ -184,7 +203,9 @@ function writeJsonAtomic(file, value) {
 let appData = {
   codes: {},
   codesByUser: {},
-  listsByUser: {}
+  listsByUser: {},
+  creatorDailyByUser: {},
+  creatorHistoryByUser: {}
 };
 
 async function loadData() {
@@ -195,7 +216,9 @@ async function loadData() {
       appData = {
         codes: doc?.codes || {},
         codesByUser: doc?.codesByUser || {},
-        listsByUser: doc?.listsByUser || {}
+        listsByUser: doc?.listsByUser || {},
+        creatorDailyByUser: doc?.creatorDailyByUser || {},
+        creatorHistoryByUser: doc?.creatorHistoryByUser || {}
       };
       // Legacy lists are migrated after the admin record exists.
       appData._legacyLists = Array.isArray(doc?.lists) ? doc.lists : [];
@@ -204,13 +227,15 @@ async function loadData() {
       appData = {
         codes: j.codes || {},
         codesByUser: j.codesByUser || {},
-        listsByUser: j.listsByUser || {}
+        listsByUser: j.listsByUser || {},
+        creatorDailyByUser: j.creatorDailyByUser || {},
+        creatorHistoryByUser: j.creatorHistoryByUser || {}
       };
       appData._legacyLists = Array.isArray(j.lists) ? j.lists : [];
     }
   } catch (e) {
     console.error('[storage] loadData:', e.message);
-    appData = { codes: {}, codesByUser: {}, listsByUser: {}, _legacyLists: [] };
+    appData = { codes: {}, codesByUser: {}, listsByUser: {}, creatorDailyByUser: {}, creatorHistoryByUser: {}, _legacyLists: [] };
   }
 }
 
@@ -219,7 +244,9 @@ async function saveData() {
     _id: 'appdata',
     codes: appData.codes || {},
     codesByUser: appData.codesByUser || {},
-    listsByUser: appData.listsByUser || {}
+    listsByUser: appData.listsByUser || {},
+    creatorDailyByUser: appData.creatorDailyByUser || {},
+    creatorHistoryByUser: appData.creatorHistoryByUser || {}
   };
 
   try {
@@ -998,6 +1025,10 @@ const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
 
+app.use('/api/group-dp/image', express.raw({
+  type: ['image/jpeg', 'image/png', 'image/webp'],
+  limit: '8mb'
+}));
 app.use(express.json({ limit: MAX_JSON_BYTES }));
 
 app.use((req, res, next) => {
@@ -1284,6 +1315,299 @@ app.get('/api/groups', requireAuth, needWA, async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: 'Could not load groups: ' + e.message });
   }
+});
+
+/* ---------- Group DP Manager ---------- */
+
+function dpErrorText(e) {
+  return String(e?.message || e || 'Unknown error')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 300);
+}
+
+function dpJobPublic(job) {
+  if (!job) return null;
+  return {
+    id: job.id,
+    action: job.action,
+    state: job.state,
+    total: job.total,
+    done: job.done,
+    success: job.success,
+    failed: job.failed,
+    current: job.current,
+    startedAt: job.startedAt,
+    finishedAt: job.finishedAt,
+    results: job.results.map((x) => ({
+      id: x.id,
+      name: x.name,
+      status: x.status,
+      error: x.error || null
+    }))
+  };
+}
+
+function cleanupDpStore() {
+  const now = Date.now();
+  for (const [token, image] of dpImages) {
+    if (image.expiresAt <= now) dpImages.delete(token);
+  }
+  for (const [id, job] of dpJobs) {
+    if (job.expiresAt <= now && job.state !== 'running') dpJobs.delete(id);
+  }
+}
+
+setInterval(cleanupDpStore, 5 * 60 * 1000).unref?.();
+
+function dpValidateIds(ids) {
+  if (!Array.isArray(ids)) throw new Error('Please select at least one group.');
+  const clean = [...new Set(ids.map((id) => String(id || '').trim()).filter(Boolean))];
+  if (!clean.length) throw new Error('Please select at least one group.');
+  if (clean.length > MAX_DP_GROUPS) throw new Error(`Please process no more than ${MAX_DP_GROUPS} groups at once.`);
+  if (clean.some((id) => !id.endsWith('@g.us'))) throw new Error('One or more selected groups are invalid.');
+  return clean;
+}
+
+function dpGetJobForUser(req, id) {
+  const job = dpJobs.get(String(id || ''));
+  if (!job || job.userId !== String(req.user.userId)) return null;
+  return job;
+}
+
+async function normalizeDpImage(buffer) {
+  if (!Buffer.isBuffer(buffer) || !buffer.length) throw new Error('Please upload an image.');
+  if (buffer.length > DP_IMAGE_MAX_BYTES) throw new Error(`Image is too large. Maximum size is ${Math.round(DP_IMAGE_MAX_BYTES / 1024 / 1024)} MB.`);
+
+  const sharp = await getSharp();
+  const meta = await sharp(buffer, { failOn: 'error' }).metadata();
+  if (!meta.width || !meta.height) throw new Error('The uploaded file is not a valid image.');
+  if (!['jpeg', 'png', 'webp'].includes(meta.format)) throw new Error('Please use JPG, PNG or WEBP image format.');
+
+  return sharp(buffer, { failOn: 'error' })
+    .rotate()
+    .resize(640, 640, { fit: 'cover', position: 'centre' })
+    .jpeg({ quality: 90, mozjpeg: true })
+    .toBuffer();
+}
+
+async function runDpJob(job) {
+  const wa = getWA(job.userId);
+  job.state = 'running';
+  job.startedAt = new Date().toISOString();
+
+  try {
+    for (let i = 0; i < job.results.length; i++) {
+      if (wa.state !== 'connected' || !wa.sock) throw new Error('WhatsApp was disconnected during the operation.');
+
+      const result = job.results[i];
+      job.current = { index: i + 1, total: job.total, name: result.name };
+      result.status = 'running';
+
+      try {
+        await withWALinkLimit(wa, async () => {
+          if (job.action === 'update') {
+            await updateGroupDp(wa, result.id, job.imageBuffer);
+          } else {
+            await wa.sock.removeProfilePicture(result.id);
+          }
+        });
+
+        result.status = 'success';
+        job.success++;
+      } catch (e) {
+        result.status = 'failed';
+        result.error = dpErrorText(e);
+        job.failed++;
+      }
+
+      job.done = i + 1;
+      if (i < job.results.length - 1) await sleep(DP_START_GAP_MS);
+    }
+
+    job.state = 'finished';
+  } catch (e) {
+    job.state = 'error';
+    job.error = dpErrorText(e);
+  } finally {
+    job.current = null;
+    job.finishedAt = new Date().toISOString();
+    job.expiresAt = Date.now() + DP_JOB_TTL_MS;
+    // Image bytes stay in the job briefly so failed groups can be retried.
+    setTimeout(() => {
+      const current = dpJobs.get(job.id);
+      if (current === job) {
+        delete current.imageBuffer;
+        current.expiresAt = Date.now() + 5 * 60 * 1000;
+      }
+    }, DP_JOB_TTL_MS - 5 * 60 * 1000).unref?.();
+  }
+}
+
+// The installed Baileys release accepts a Buffer directly for profile-picture
+// updates. This small wrapper keeps the call in one place and makes failures
+// easier to diagnose.
+async function updateGroupDp(wa, jid, imageBuffer) {
+  if (!Buffer.isBuffer(imageBuffer) || !imageBuffer.length) throw new Error('No image data is available.');
+  await wa.sock.updateProfilePicture(jid, imageBuffer);
+}
+
+app.post('/api/group-dp/image', requireAuth, (req, res) => {
+  try {
+    const type = String(req.headers['content-type'] || '').split(';')[0].toLowerCase();
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(type)) {
+      return res.status(415).json({ error: 'Please upload a JPG, PNG or WEBP image.' });
+    }
+    const buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body || '');
+    if (!buffer.length) return res.status(400).json({ error: 'Please upload an image.' });
+    if (buffer.length > DP_IMAGE_MAX_BYTES) {
+      return res.status(413).json({ error: `Image is too large. Maximum size is ${Math.round(DP_IMAGE_MAX_BYTES / 1024 / 1024)} MB.` });
+    }
+
+    const token = crypto.randomUUID();
+    dpImages.set(token, {
+      userId: String(req.user.userId),
+      buffer,
+      type,
+      expiresAt: Date.now() + DP_IMAGE_TTL_MS
+    });
+    res.json({ ok: true, token });
+  } catch (e) {
+    res.status(400).json({ error: dpErrorText(e) });
+  }
+});
+
+app.post('/api/group-dp/apply', requireAuth, needWA, async (req, res) => {
+  try {
+    cleanupDpStore();
+    const ids = dpValidateIds(req.body?.ids);
+    const token = String(req.body?.imageToken || '');
+    const image = dpImages.get(token);
+    if (!image || image.userId !== String(req.user.userId)) return res.status(400).json({ error: 'The uploaded image has expired. Please upload it again.' });
+
+    const normalized = await normalizeDpImage(image.buffer);
+    dpImages.delete(token);
+
+    const all = await getGroups(getWA(req.user.userId), false);
+    const results = ids.map((id) => ({
+      id,
+      name: String(all[id]?.subject || id),
+      status: 'pending',
+      error: null
+    }));
+
+    const job = {
+      id: `DP-${Date.now().toString(36).toUpperCase()}`,
+      userId: String(req.user.userId),
+      action: 'update',
+      imageBuffer: normalized,
+      results,
+      total: results.length,
+      done: 0,
+      success: 0,
+      failed: 0,
+      current: null,
+      state: 'queued',
+      startedAt: null,
+      finishedAt: null,
+      error: null,
+      expiresAt: Date.now() + DP_JOB_TTL_MS
+    };
+
+    dpJobs.set(job.id, job);
+    runDpJob(job).catch((e) => {
+      job.state = 'error';
+      job.error = dpErrorText(e);
+      job.finishedAt = new Date().toISOString();
+      job.expiresAt = Date.now() + DP_JOB_TTL_MS;
+    });
+    res.json({ ok: true, job: dpJobPublic(job) });
+  } catch (e) {
+    res.status(400).json({ error: dpErrorText(e) });
+  }
+});
+
+app.post('/api/group-dp/remove', requireAuth, needWA, async (req, res) => {
+  try {
+    const ids = dpValidateIds(req.body?.ids);
+    const all = await getGroups(getWA(req.user.userId), false);
+    const results = ids.map((id) => ({
+      id,
+      name: String(all[id]?.subject || id),
+      status: 'pending',
+      error: null
+    }));
+
+    const job = {
+      id: `DP-${Date.now().toString(36).toUpperCase()}`,
+      userId: String(req.user.userId),
+      action: 'remove',
+      imageBuffer: null,
+      results,
+      total: results.length,
+      done: 0,
+      success: 0,
+      failed: 0,
+      current: null,
+      state: 'queued',
+      startedAt: null,
+      finishedAt: null,
+      error: null,
+      expiresAt: Date.now() + DP_JOB_TTL_MS
+    };
+
+    dpJobs.set(job.id, job);
+    runDpJob(job).catch((e) => {
+      job.state = 'error';
+      job.error = dpErrorText(e);
+      job.finishedAt = new Date().toISOString();
+      job.expiresAt = Date.now() + DP_JOB_TTL_MS;
+    });
+    res.json({ ok: true, job: dpJobPublic(job) });
+  } catch (e) {
+    res.status(400).json({ error: dpErrorText(e) });
+  }
+});
+
+app.get('/api/group-dp/job/:id', requireAuth, (req, res) => {
+  const job = dpGetJobForUser(req, req.params.id);
+  if (!job) return res.status(404).json({ error: 'DP job not found or expired.' });
+  res.json({ job: dpJobPublic(job), error: job.error || null });
+});
+
+app.post('/api/group-dp/job/:id/retry', requireAuth, needWA, async (req, res) => {
+  const old = dpGetJobForUser(req, req.params.id);
+  if (!old) return res.status(404).json({ error: 'DP job not found or expired.' });
+  if (old.state === 'running' || old.state === 'queued') return res.status(409).json({ error: 'The current DP job is still running.' });
+
+  const failed = old.results.filter((x) => x.status === 'failed');
+  if (!failed.length) return res.status(400).json({ error: 'There are no failed groups to retry.' });
+  if (old.action === 'update' && !old.imageBuffer) return res.status(410).json({ error: 'The uploaded image has expired. Please start a new update.' });
+
+  const retry = {
+    id: `DP-${Date.now().toString(36).toUpperCase()}`,
+    userId: old.userId,
+    action: old.action,
+    imageBuffer: old.imageBuffer || null,
+    results: failed.map((x) => ({ ...x, status: 'pending', error: null })),
+    total: failed.length,
+    done: 0,
+    success: 0,
+    failed: 0,
+    current: null,
+    state: 'queued',
+    startedAt: null,
+    finishedAt: null,
+    error: null,
+    expiresAt: Date.now() + DP_JOB_TTL_MS
+  };
+  dpJobs.set(retry.id, retry);
+  runDpJob(retry).catch((e) => {
+    retry.state = 'error';
+    retry.error = dpErrorText(e);
+    retry.finishedAt = new Date().toISOString();
+  });
+  res.json({ ok: true, job: dpJobPublic(retry) });
 });
 
 /* ---------- Group permissions ---------- */
@@ -1780,6 +2104,497 @@ app.get('/api/group-name-job/:id', requireAuth, (req, res) => {
     return res.status(404).json({ error: 'Group name job not found' });
   }
   res.json(groupNamePublic(job));
+});
+
+
+/* ---------- Group Creator ----------
+   Uses the CURRENT user's existing WhatsApp socket. It does not create a
+   second Baileys connection, so existing Link Organizer, Permissions,
+   Group Names and Stats sessions remain untouched.
+--------------------------------------------------------------- */
+const CREATOR_BATCH_MAX = 25;
+const CREATOR_MAX_PER_DAY = 100;
+const CREATOR_FIXED_GAP_MS = 5000;
+const CREATOR_WARNING_WINDOW_MS = 30 * 1000;
+const CREATOR_GROUP_CREATE_TIMEOUT_MS = 45000;
+const CREATOR_LINK_RETRY_DELAY_MS = 2500;
+const CREATOR_LINK_RECOVERY_ATTEMPTS = 2;
+const creatorJobs = new Map();
+const creatorLastBatchFinishedAt = new Map();
+const creatorLinkQueues = new Map();
+const creatorLinkRunning = new Set();
+let creatorSaveTimer = null;
+function creatorPersistSoon() {
+  clearTimeout(creatorSaveTimer);
+  creatorSaveTimer = setTimeout(() => { saveData().catch(() => {}); }, 250);
+}
+
+function creatorState(userId) {
+  const key = String(userId);
+  if (!appData.creatorDailyByUser[key] || typeof appData.creatorDailyByUser[key] !== 'object') {
+    appData.creatorDailyByUser[key] = {};
+  }
+  if (!appData.creatorHistoryByUser[key] || !Array.isArray(appData.creatorHistoryByUser[key])) {
+    appData.creatorHistoryByUser[key] = [];
+  }
+  return {
+    daily: appData.creatorDailyByUser[key],
+    history: appData.creatorHistoryByUser[key]
+  };
+}
+
+function creatorTodayKey() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function creatorUsage(userId) {
+  const state = creatorState(userId);
+  const key = creatorTodayKey();
+  const value = Number(state.daily[key] || 0);
+  return Number.isFinite(value) ? Math.max(0, value) : 0;
+}
+
+function incrementCreatorUsage(userId, amount = 1) {
+  const state = creatorState(userId);
+  const key = creatorTodayKey();
+  state.daily[key] = creatorUsage(userId) + amount;
+  for (const date of Object.keys(state.daily)) {
+    if (date !== key) {
+      const age = Date.now() - new Date(`${date}T00:00:00Z`).getTime();
+      if (age > 8 * 24 * 60 * 60 * 1000) delete state.daily[date];
+    }
+  }
+  creatorPersistSoon();
+}
+
+function creatorErrorText(e) {
+  return String(e?.message || e?.data || e || 'unknown error');
+}
+
+function creatorCleanPhone(value) {
+  const digits = String(value || '').replace(/\D/g, '');
+  return digits.length >= 10 && digits.length <= 15 ? digits : null;
+}
+
+function creatorUniqueMembers(input) {
+  const seen = new Set();
+  const valid = [];
+  let invalid = 0;
+  let duplicate = 0;
+
+  for (const raw of input) {
+    const n = creatorCleanPhone(raw);
+    if (!n) { invalid++; continue; }
+    if (seen.has(n)) { duplicate++; continue; }
+    seen.add(n);
+    valid.push(n);
+  }
+  return { valid, invalid, duplicate };
+}
+
+function creatorConnectedNumber(wa) {
+  const raw = wa?.sock?.user?.id;
+  if (!raw) return null;
+  return creatorCleanPhone(String(raw).split(':')[0]);
+}
+
+function creatorBuildNames(prefix, start, amount) {
+  const p = String(prefix || '').trim();
+  return Array.from({ length: amount }, (_, i) => `${p} ${start + i}`.trim());
+}
+
+function creatorPublicJob(job) {
+  if (!job) return null;
+  return {
+    id: job.id,
+    prefix: job.prefix,
+    start: job.start,
+    requested: job.requested,
+    total: job.total,
+    completed: job.completed,
+    failed: job.failed,
+    pending: Math.max(0, job.total - job.completed - job.failed),
+    paused: job.paused,
+    cancelled: job.cancelled,
+    running: job.running,
+    startedAt: job.startedAt,
+    finishedAt: job.finishedAt,
+    current: job.current,
+    results: job.results,
+    validation: job.validation,
+    accountNumber: job.accountNumber
+  };
+}
+
+function creatorRecentWarning(userId) {
+  const last = creatorLastBatchFinishedAt.get(String(userId)) || 0;
+  if (!last) return null;
+  const elapsed = Date.now() - last;
+  if (elapsed >= CREATOR_WARNING_WINDOW_MS) return null;
+  const seconds = Math.max(1, Math.ceil((CREATOR_WARNING_WINDOW_MS - elapsed) / 1000));
+  return `Previous batch just finished. For smoother operation, try again after about ${seconds} seconds. You can still create this batch now.`;
+}
+
+function creatorAddHistory(userId, job) {
+  const state = creatorState(userId);
+  state.history.unshift({
+    id: job.id,
+    accountNumber: job.accountNumber,
+    prefix: job.prefix,
+    start: job.start,
+    requested: job.requested,
+    total: job.total,
+    members: job.members,
+    delay: job.delay,
+    completed: job.completed,
+    failed: job.failed,
+    results: job.results,
+    running: false,
+    paused: false,
+    cancelled: job.cancelled,
+    current: null,
+    startedAt: job.startedAt,
+    finishedAt: job.finishedAt,
+    validation: job.validation
+  });
+  state.history.splice(50);
+  creatorPersistSoon();
+}
+
+function creatorEnqueueLinkRecovery(userId, job, result) {
+  if (!result?.id || result.link) return;
+  const key = String(userId);
+  if (!creatorLinkQueues.has(key)) creatorLinkQueues.set(key, []);
+  creatorLinkQueues.get(key).push({ job, result, attempts: 0, nextAt: Date.now() + CREATOR_LINK_RETRY_DELAY_MS });
+  creatorProcessLinkRecovery(key).catch(() => {});
+}
+
+async function creatorProcessLinkRecovery(userId) {
+  const key = String(userId);
+  if (creatorLinkRunning.has(key)) return;
+  creatorLinkRunning.add(key);
+  try {
+    const queue = creatorLinkQueues.get(key) || [];
+    while (queue.length) {
+      const item = queue[0];
+      const wait = item.nextAt - Date.now();
+      if (wait > 0) await sleep(wait);
+      queue.shift();
+      if (item.result.link) continue;
+      const wa = getWA(key);
+      if (wa.state !== 'connected' || !wa.sock) {
+        item.nextAt = Date.now() + 5000;
+        queue.push(item);
+        continue;
+      }
+      item.attempts++;
+      try {
+        const code = await wa.sock.groupInviteCode(item.result.id);
+        if (code) {
+          item.result.link = `https://chat.whatsapp.com/${code}`;
+          item.result.linkAvailable = true;
+          item.result.linkPending = false;
+          item.result.linkError = null;
+          creatorPersistSoon();
+          continue;
+        }
+      } catch (e) {
+        item.result.linkError = creatorErrorText(e);
+      }
+      if (item.attempts < CREATOR_LINK_RECOVERY_ATTEMPTS) {
+        item.nextAt = Date.now() + (item.attempts === 1 ? 5000 : 10000);
+        queue.push(item);
+      } else {
+        item.result.linkPending = false;
+        item.result.linkAvailable = false;
+        creatorPersistSoon();
+      }
+    }
+  } finally {
+    creatorLinkRunning.delete(key);
+    if (creatorLinkQueues.get(key)?.length) creatorProcessLinkRecovery(key).catch(() => {});
+  }
+}
+
+async function creatorWithTimeout(promise, ms, message) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(message)), ms))
+  ]);
+}
+
+async function creatorCreateOne(userId, job, name, index) {
+  const wa = getWA(userId);
+  if (job.cancelled) throw new Error('Job cancelled.');
+  if (!wa.sock || wa.state !== 'connected') throw new Error('WhatsApp is no longer connected.');
+
+  const jidList = job.members.map((n) => `${n}@s.whatsapp.net`);
+  const group = await creatorWithTimeout(
+    wa.sock.groupCreate(name, jidList),
+    CREATOR_GROUP_CREATE_TIMEOUT_MS,
+    `Group creation timed out after ${CREATOR_GROUP_CREATE_TIMEOUT_MS / 1000}s.`
+  );
+
+  let link = '';
+  try {
+    const code = await wa.sock.groupInviteCode(group.id);
+    link = code ? `https://chat.whatsapp.com/${code}` : '';
+  } catch {}
+
+  const result = {
+    index,
+    name,
+    id: group.id,
+    link,
+    linkAvailable: Boolean(link),
+    linkPending: !link,
+    status: 'success',
+    createdAt: new Date().toISOString()
+  };
+
+  if (!link) creatorEnqueueLinkRecovery(userId, job, result);
+  return result;
+}
+
+async function creatorWaitBetween(job, ms) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    if (job.cancelled) return;
+    while (job.paused && !job.cancelled) await sleep(250);
+    if (job.cancelled) return;
+    await sleep(Math.min(250, Math.max(50, end - Date.now())));
+  }
+}
+
+async function creatorRunJob(userId, job) {
+  job.running = true;
+  job.startedAt = new Date().toISOString();
+  creatorPersistSoon();
+
+  for (let i = 0; i < job.names.length; i++) {
+    if (job.cancelled) break;
+    while (job.paused && !job.cancelled) await sleep(250);
+    if (job.cancelled) break;
+
+    const name = job.names[i];
+    job.current = { index: i + 1, name };
+    try {
+      const result = await creatorCreateOne(userId, job, name, i + 1);
+      job.results.push(result);
+      job.completed++;
+      incrementCreatorUsage(userId, 1);
+    } catch (e) {
+      job.results.push({ index: i + 1, name, status: 'failed', error: creatorErrorText(e), createdAt: new Date().toISOString() });
+      job.failed++;
+    }
+    creatorPersistSoon();
+    if (i < job.names.length - 1 && !job.cancelled) await creatorWaitBetween(job, CREATOR_FIXED_GAP_MS);
+  }
+
+  job.current = null;
+  job.running = false;
+  job.finishedAt = new Date().toISOString();
+  creatorAddHistory(userId, job);
+  creatorLastBatchFinishedAt.set(String(userId), Date.now());
+  creatorJobs.delete(String(userId));
+}
+
+function creatorStartJob(userId, payload) {
+  const key = String(userId);
+  const wa = getWA(key);
+  if (wa.state !== 'connected' || !wa.sock) throw new Error('WhatsApp is not connected.');
+  if (creatorJobs.has(key)) throw new Error('Another group creation job is already active.');
+
+  const accountNumber = creatorConnectedNumber(wa);
+  if (!accountNumber) throw new Error('Unable to identify the connected WhatsApp account. Please reconnect WhatsApp.');
+
+  const prefix = String(payload?.prefix ?? '').trim();
+  const start = Number.parseInt(payload?.start, 10);
+  const rawAmount = Number.parseInt(payload?.amount, 10);
+  if (!prefix) throw new Error('Please enter a group prefix.');
+  if (!Number.isInteger(start) || start < 0) throw new Error('Please enter a valid starting number.');
+  if (!Number.isInteger(rawAmount) || rawAmount < 1 || rawAmount > CREATOR_BATCH_MAX) throw new Error(`One batch can contain maximum ${CREATOR_BATCH_MAX} groups.`);
+
+  const membersRaw = Array.isArray(payload?.members) ? payload.members : String(payload?.members || '').split(/\r?\n/);
+  const cleanedInput = membersRaw.map((v) => String(v).trim()).filter(Boolean);
+  let members = creatorUniqueMembers(cleanedInput);
+  let usedConnectedNumber = false;
+  if (!members.valid.length && cleanedInput.length === 0) {
+    members = { valid: [accountNumber], invalid: 0, duplicate: 0 };
+    usedConnectedNumber = true;
+  }
+  if (!members.valid.length) throw new Error('Please enter at least one valid member number.');
+
+  const createdToday = creatorUsage(key);
+  const remaining = CREATOR_MAX_PER_DAY - createdToday;
+  if (remaining <= 0) throw new Error(`Daily limit reached for +${accountNumber}. This WhatsApp account has already created ${CREATOR_MAX_PER_DAY}/${CREATOR_MAX_PER_DAY} groups today.`);
+  if (rawAmount > remaining) throw new Error(`Only ${remaining} group creation slot${remaining === 1 ? '' : 's'} remain today for +${accountNumber}.`);
+
+  const names = creatorBuildNames(prefix, start, rawAmount);
+  const job = {
+    id: `JOB-${Date.now().toString(36).toUpperCase()}`,
+    userId: key,
+    accountNumber,
+    prefix,
+    start,
+    requested: rawAmount,
+    total: rawAmount,
+    names,
+    members: members.valid,
+    delay: CREATOR_FIXED_GAP_MS / 1000,
+    completed: 0,
+    failed: 0,
+    results: [],
+    running: false,
+    paused: false,
+    cancelled: false,
+    current: null,
+    startedAt: null,
+    finishedAt: null,
+    validation: {
+      validMembers: members.valid.length,
+      invalidMembers: members.invalid,
+      duplicateMembers: members.duplicate,
+      effectiveAmount: rawAmount,
+      batchMax: CREATOR_BATCH_MAX,
+      fixedGapSeconds: CREATOR_FIXED_GAP_MS / 1000,
+      usedConnectedNumber,
+      accountNumber,
+      dailyUsedBefore: createdToday,
+      dailyRemainingBefore: remaining
+    }
+  };
+  creatorJobs.set(key, job);
+  return job;
+}
+
+app.get('/api/group-creator/status', requireAuth, (req, res) => {
+  const key = String(req.user.userId);
+  const wa = getWA(key);
+  const state = creatorState(key);
+  res.json({
+    state: wa.state,
+    accountNumber: creatorConnectedNumber(wa),
+    createdToday: creatorUsage(key),
+    maxPerDay: CREATOR_MAX_PER_DAY,
+    batchMax: CREATOR_BATCH_MAX,
+    fixedGap: CREATOR_FIXED_GAP_MS / 1000,
+    job: creatorPublicJob(creatorJobs.get(key)),
+    history: state.history.slice(0, 20)
+  });
+});
+
+app.post('/api/group-creator/create', requireAuth, needWA, (req, res) => {
+  try {
+    const key = String(req.user.userId);
+    const job = creatorStartJob(key, req.body || {});
+    const warning = creatorRecentWarning(key);
+    res.json({ ok: true, job: creatorPublicJob(job), validation: job.validation, warning });
+    creatorRunJob(key, job).catch((e) => {
+      job.running = false;
+      job.finishedAt = new Date().toISOString();
+      job.failed++;
+      job.results.push({ index: job.results.length + 1, name: job.current?.name || 'Unknown', status: 'failed', error: creatorErrorText(e), createdAt: new Date().toISOString() });
+      creatorAddHistory(key, job);
+      creatorJobs.delete(key);
+    });
+  } catch (e) {
+    res.status(400).json({ error: creatorErrorText(e) });
+  }
+});
+
+app.post('/api/group-creator/link/retry', requireAuth, needWA, async (req, res) => {
+  const key = String(req.user.userId);
+  const jobId = String(req.body?.jobId || '');
+  const index = Number.parseInt(req.body?.index, 10);
+  const history = creatorState(key).history;
+  const job = history.find((j) => j.id === jobId);
+  if (!job) return res.status(404).json({ error: 'The requested batch was not found.' });
+  const result = (job.results || []).find((r) => Number(r.index) === index);
+  if (!result) return res.status(404).json({ error: 'The requested group result was not found.' });
+  if (result.link) return res.json({ ok: true, result });
+  try {
+    const wa = getWA(key);
+    const code = await wa.sock.groupInviteCode(result.id);
+    if (!code) return res.status(503).json({ error: 'WhatsApp did not return an invite link yet. Please try again shortly.' });
+    result.link = `https://chat.whatsapp.com/${code}`;
+    result.linkAvailable = true;
+    result.linkPending = false;
+    result.linkError = null;
+    await saveData();
+    res.json({ ok: true, result });
+  } catch (e) {
+    res.status(503).json({ error: `Invite-link retry failed: ${creatorErrorText(e)}` });
+  }
+});
+
+app.post('/api/group-creator/job/pause', requireAuth, (req, res) => {
+  const job = creatorJobs.get(String(req.user.userId));
+  if (!job) return res.status(404).json({ error: 'No active job.' });
+  job.paused = true;
+  res.json({ ok: true });
+});
+
+app.post('/api/group-creator/job/resume', requireAuth, (req, res) => {
+  const job = creatorJobs.get(String(req.user.userId));
+  if (!job) return res.status(404).json({ error: 'No active job.' });
+  job.paused = false;
+  res.json({ ok: true });
+});
+
+app.post('/api/group-creator/job/cancel', requireAuth, (req, res) => {
+  const job = creatorJobs.get(String(req.user.userId));
+  if (!job) return res.status(404).json({ error: 'No active job.' });
+  job.cancelled = true;
+  job.paused = false;
+  res.json({ ok: true });
+});
+
+app.post('/api/group-creator/job/retry', requireAuth, needWA, (req, res) => {
+  try {
+    const key = String(req.user.userId);
+    if (creatorJobs.has(key)) return res.status(409).json({ error: 'Another group creation job is already active.' });
+    const id = String(req.body?.id || '');
+    const old = creatorState(key).history.find((j) => j.id === id);
+    if (!old) return res.status(404).json({ error: 'The requested batch was not found.' });
+    const failed = (old.results || []).filter((r) => r.status === 'failed').map((r) => r.name);
+    if (!failed.length) return res.status(400).json({ error: 'This job has no failed groups to retry.' });
+
+    const wa = getWA(key);
+    const accountNumber = creatorConnectedNumber(wa);
+    if (!accountNumber || accountNumber !== old.accountNumber) return res.status(409).json({ error: 'Reconnect the same WhatsApp account that created this batch before retrying it.' });
+
+    const remaining = CREATOR_MAX_PER_DAY - creatorUsage(key);
+    if (remaining <= 0) return res.status(400).json({ error: `Daily limit reached for +${accountNumber}.` });
+    const names = failed.slice(0, Math.min(CREATOR_BATCH_MAX, remaining));
+    const job = {
+      id: `RETRY-${Date.now().toString(36).toUpperCase()}`,
+      userId: key,
+      accountNumber,
+      prefix: old.prefix,
+      start: old.start,
+      requested: names.length,
+      total: names.length,
+      names,
+      members: old.members,
+      delay: CREATOR_FIXED_GAP_MS / 1000,
+      completed: 0,
+      failed: 0,
+      results: [],
+      running: false,
+      paused: false,
+      cancelled: false,
+      current: null,
+      startedAt: null,
+      finishedAt: null,
+      validation: { retryOf: old.id, batchMax: CREATOR_BATCH_MAX, fixedGapSeconds: CREATOR_FIXED_GAP_MS / 1000, accountNumber }
+    };
+    creatorJobs.set(key, job);
+    res.json({ ok: true, job: creatorPublicJob(job) });
+    creatorRunJob(key, job).catch(() => {});
+  } catch (e) {
+    res.status(400).json({ error: creatorErrorText(e) });
+  }
 });
 
 /* ---------- Link jobs ---------- */
@@ -2282,6 +3097,10 @@ app.get('/dashboard.html', (req, res) => {
 
 app.get('/link-organizer.html', (req, res) => {
   res.sendFile('link-organizer.html', { root: 'public' });
+});
+
+app.get('/group-dp.html', (req, res) => {
+  res.sendFile('group-dp.html', { root: 'public' });
 });
 
 /* ---------- Static files ---------- */
