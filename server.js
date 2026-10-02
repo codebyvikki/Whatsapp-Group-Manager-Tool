@@ -31,6 +31,54 @@ let permissionHealthySuccesses = 0;
 let permissionQueueActive = 0;
 const permissionQueue = [];
 
+function notePermissionRateLimit(attempt = 1) {
+  const now = Date.now();
+
+  permissionHealthySuccesses = 0;
+
+  permissionAdaptiveGapMs = Math.min(
+    PERMISSION_MAX_GAP_MS,
+    Math.max(
+      PERMISSION_START_GAP_MS,
+      Math.round(permissionAdaptiveGapMs * 1.8)
+    )
+  );
+
+  permissionCooldownUntil = Math.max(
+    permissionCooldownUntil,
+    now + Math.min(5000, 800 * attempt)
+  );
+}
+
+async function waitPermissionSlot() {
+  const now = Date.now();
+  const waitUntil = Math.max(
+    permissionNextAllowedAt,
+    permissionCooldownUntil
+  );
+
+  if (waitUntil > now) {
+    await sleep(waitUntil - now);
+  }
+
+  const current = Date.now();
+
+  permissionNextAllowedAt =
+    current + permissionAdaptiveGapMs;
+
+  permissionHealthySuccesses++;
+
+  if (permissionHealthySuccesses >= 8) {
+    permissionHealthySuccesses = 0;
+
+    permissionAdaptiveGapMs = Math.max(
+      PERMISSION_START_GAP_MS,
+      Math.round(permissionAdaptiveGapMs * 0.82)
+    );
+  }
+}
+
+
 function pumpPermissionQueue() {
   while (permissionQueueActive < PERMISSION_GLOBAL_CONCURRENCY && permissionQueue.length) {
     const item = permissionQueue.shift();
@@ -429,7 +477,10 @@ function getWA(userId) {
 }
 
 function withWALinkLimit(wa, task) {
-  const max = Math.max(8, Number(process.env.MAX_WA_LINK_REQUESTS || 8));
+  const max = Math.min(
+    12,
+    Math.max(8, Number(process.env.MAX_WA_LINK_REQUESTS || 12))
+  );
   return new Promise((resolve, reject) => {
     wa.linkQueue.push({ task, resolve, reject, max });
     const pump = () => {
@@ -496,23 +547,49 @@ function isPermanentPermissionError(message) {
 
 async function runPermissionOperation(wa, operation) {
   let lastError = null;
+
   for (let attempt = 1; attempt <= PERMISSION_MAX_ATTEMPTS; attempt++) {
     try {
       await waitPermissionSlot();
-      return await withPermissionConcurrency(() => withWALinkLimit(wa, operation));
+
+      const result = await withPermissionConcurrency(() =>
+        withWALinkLimit(wa, operation)
+      );
+
+      return result;
     } catch (e) {
       lastError = e;
+
       const message = errText(e);
-      if (isPermanentPermissionError(message)) break;
+
+      if (isPermanentPermissionError(message)) {
+        break;
+      }
+
       const rateLimited = isPermissionRateError(message);
-      if (rateLimited) notePermissionRateLimit(attempt);
-      if (attempt === PERMISSION_MAX_ATTEMPTS) break;
+
+      if (rateLimited) {
+        notePermissionRateLimit(attempt);
+      }
+
+      if (attempt === PERMISSION_MAX_ATTEMPTS) {
+        break;
+      }
+
       const delay = rateLimited
-        ? Math.min(14000, PERMISSION_RETRY_BASE_MS * (attempt + 1) * 2)
-        : Math.min(7000, PERMISSION_RETRY_BASE_MS * attempt);
+        ? Math.min(
+            8000,
+            PERMISSION_RETRY_BASE_MS * attempt * 2
+          )
+        : Math.min(
+            3000,
+            PERMISSION_RETRY_BASE_MS * attempt
+          );
+
       await sleep(delay);
     }
   }
+
   throw lastError || new Error('Permission update failed');
 }
 
@@ -1357,37 +1434,63 @@ const jobs = new Map();
 
 async function tryCode(wa, it, fresh = false) {
   if (!fresh) {
-    const cached = wa.codeInflight.has(it.id)
-      ? await wa.codeInflight.get(it.id)
-      : null;
-    if (cached?.code) return cached;
-
     const local = wa.codeCache.get(it.id);
-    if (local && Date.now() - local.at < CODE_CACHE_TTL_MS) return { code: local.code };
-    if (appData.codes[it.id]) return { code: appData.codes[it.id] };
+
+    if (local?.code) {
+      return { code: local.code };
+    }
+
+    if (appData.codes[it.id]) {
+      return { code: appData.codes[it.id] };
+    }
   }
 
-  if (wa.codeInflight.has(it.id)) return codeInflight.get(it.id);
+  if (wa.codeInflight.has(it.id)) {
+    return wa.codeInflight.get(it.id);
+  }
 
   const promise = withWALinkLimit(wa, async () => {
     try {
       if (!wa.sock || wa.state !== 'connected') {
-        return { err: 'WhatsApp is not connected', kind: 'other' };
+        return {
+          err: 'WhatsApp is not connected',
+          kind: 'other'
+        };
       }
 
       const code = await wa.sock.groupInviteCode(it.id);
+
       if (code) {
-        wa.codeCache.set(it.id, { code, at: Date.now() });
+        wa.codeCache.set(it.id, {
+          code,
+          at: Date.now()
+        });
+
         return { code };
       }
-      return { err: 'empty response from WhatsApp', kind: 'other' };
+
+      return {
+        err: 'empty response from WhatsApp',
+        kind: 'other'
+      };
+
     } catch (e) {
       const m = errText(e);
-      return { err: m, kind: isAdminErr(m) ? 'admin' : isRateErr(m) ? 'rate' : 'other' };
+
+      return {
+        err: m,
+        kind:
+          isAdminErr(m)
+            ? 'admin'
+            : isRateErr(m)
+              ? 'rate'
+              : 'other'
+      };
     }
   });
 
   wa.codeInflight.set(it.id, promise);
+
   try {
     return await promise;
   } finally {
@@ -1412,69 +1515,214 @@ const bad = (it, note) => ({
 
 async function runJob(job, items, fresh, wa) {
   const out = job.results;
-  const codes = appData.codesByUser[job.userId] || {};
+
+  const codes =
+    appData.codesByUser[job.userId] || {};
+
   appData.codesByUser[job.userId] = codes;
+
   const todo = [];
+
+  // -----------------------------------------
+  // CACHE / MISSING GROUP FILTER
+  // -----------------------------------------
 
   items.forEach((it, i) => {
     if (!it.id) {
       out[i] = bad(it, 'Group not found');
       job.done++;
-    } else if (!fresh && codes[it.id]) {
+      return;
+    }
+
+    if (!fresh && codes[it.id]) {
       out[i] = ok(it, codes[it.id]);
       job.done++;
-    } else {
-      todo.push(i);
+      return;
     }
+
+    todo.push(i);
   });
+
+  // -----------------------------------------
+  // CONTINUOUS WORKER QUEUE
+  // -----------------------------------------
+
+  const concurrency = Math.min(
+    12,
+    Math.max(
+      8,
+      Number(process.env.MAX_WA_LINK_REQUESTS || 12)
+    )
+  );
+
+  let nextIndex = 0;
 
   const retry = [];
 
-  for (let s = 0; s < todo.length; s += 8) {
-    await Promise.all(todo.slice(s, s + 8).map(async (i) => {
+  async function worker() {
+    while (true) {
+      const index = nextIndex++;
+
+      if (index >= todo.length) {
+        return;
+      }
+
+      const i = todo[index];
       const it = items[i];
-      const r = await tryCode(wa, it, fresh);
+
+      const r = await tryCode(
+        wa,
+        it,
+        fresh
+      );
 
       if (r.code) {
         codes[it.id] = r.code;
-        out[i] = ok(it, r.code);
+
+        out[i] = ok(
+          it,
+          r.code
+        );
+
         job.done++;
-      } else if (r.kind === 'admin') {
-        out[i] = bad(it, 'You are not an admin of this group');
-        job.done++;
-      } else {
-        retry.push(i);
+
+        continue;
       }
-    }));
 
-    
+      if (r.kind === 'admin') {
+        out[i] = bad(
+          it,
+          'You are not an admin of this group'
+        );
+
+        job.done++;
+
+        continue;
+      }
+
+      retry.push(i);
+    }
   }
 
-  retry.sort((x, y) => x - y);
+  // IMPORTANT:
+  // Workers continuously pick the next group.
+  // There is no 8-group batch waiting anymore.
 
-  for (const i of retry) {
-    const it = items[i];
-    let r = null;
+  await Promise.all(
+    Array.from(
+      {
+        length: Math.min(
+          concurrency,
+          todo.length
+        )
+      },
+      () => worker()
+    )
+  );
 
-    for (let a = 1; a <= 4; a++) {
-      await sleep(1200 * a);
-      r = await tryCode(wa, it, fresh);
-      if (r.code || r.kind === 'admin') break;
+  // -----------------------------------------
+  // RETRIES
+  // -----------------------------------------
+
+  if (retry.length) {
+    let retryIndex = 0;
+
+    const retryConcurrency = Math.min(
+      4,
+      retry.length
+    );
+
+    async function retryWorker() {
+      while (true) {
+        const index = retryIndex++;
+
+        if (index >= retry.length) {
+          return;
+        }
+
+        const i = retry[index];
+        const it = items[i];
+
+        let result = null;
+
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          // Small adaptive delay.
+          // Rate-limit errors get a little more time.
+          const delay =
+            attempt === 1
+              ? 500
+              : attempt === 2
+                ? 1000
+                : 1800;
+
+          await sleep(delay);
+
+          result = await tryCode(
+            wa,
+            it,
+            fresh
+          );
+
+          if (
+            result.code ||
+            result.kind === 'admin'
+          ) {
+            break;
+          }
+
+          if (result.kind === 'rate') {
+            await sleep(1500 * attempt);
+          }
+        }
+
+        if (result?.code) {
+          codes[it.id] = result.code;
+
+          out[i] = ok(
+            it,
+            result.code
+          );
+
+        } else if (
+          result?.kind === 'admin'
+        ) {
+          out[i] = bad(
+            it,
+            'You are not an admin of this group'
+          );
+
+        } else if (
+          result?.kind === 'rate'
+        ) {
+          out[i] = bad(
+            it,
+            'WhatsApp is rate limiting requests right now. Retry failed groups after a short wait'
+          );
+
+        } else {
+          out[i] = bad(
+            it,
+            `Could not get link (${result?.err || 'unknown error'})`
+          );
+        }
+
+        job.done++;
+      }
     }
 
-    if (r.code) {
-      codes[it.id] = r.code;
-      out[i] = ok(it, r.code);
-    } else if (r.kind === 'admin') {
-      out[i] = bad(it, 'You are not an admin of this group');
-    } else if (r.kind === 'rate') {
-      out[i] = bad(it, 'WhatsApp is rate limiting requests right now. Wait 1-2 minutes, then retry failed groups');
-    } else {
-      out[i] = bad(it, `Could not get link (${r.err})`);
-    }
-
-    job.done++;
+    await Promise.all(
+      Array.from(
+        {
+          length: retryConcurrency
+        },
+        () => retryWorker()
+      )
+    );
   }
+
+  // -----------------------------------------
+  // SAVE ONCE AT THE END
+  // -----------------------------------------
 
   await saveData();
 }
