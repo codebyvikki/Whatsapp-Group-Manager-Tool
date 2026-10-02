@@ -438,9 +438,10 @@ function createWAContext(userId) {
   const wa = {
     userId: String(userId),
     sock: null,
-    state: 'starting',
+    state: 'idle',
     qrDataUrl: null,
     startPromise: null,
+    manualStop: false,
     reconnectTimer: null,
     reconnectDelay: 2000,
     groupCache: { at: 0, data: null },
@@ -665,7 +666,7 @@ function clearReconnectTimer(wa) {
 }
 
 function scheduleWAReconnect(wa) {
-  if (wa.state === 'closed' || wa.reconnectTimer || wa.startPromise) return;
+  if (wa.manualStop || wa.state === 'closed' || wa.reconnectTimer || wa.startPromise) return;
   const delay = wa.reconnectDelay;
   wa.reconnectDelay = Math.min(wa.reconnectDelay * 2, 30000);
 
@@ -774,6 +775,7 @@ async function useMongoAuthState(col, ownerId) {
 
 async function startWA(userId) {
   const wa = getWA(userId);
+  wa.manualStop = false;
   if (wa.startPromise) return wa.startPromise;
   clearReconnectTimer(wa);
 
@@ -806,9 +808,24 @@ async function startWA(userId) {
     currentSocket.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
       if (wa.sock !== currentSocket) return;
 
+      if (connection === 'connecting' && !qr && wa.state !== 'qr') {
+        wa.state = 'connecting';
+      }
+
       if (qr) {
-        wa.state = 'qr';
-        wa.qrDataUrl = await QRCode.toDataURL(qr, { width: 280, margin: 1 });
+        try {
+          // Build the image first. Only expose state=qr after a valid data URL
+          // exists, otherwise the dashboard can briefly receive a broken QR.
+          const qrDataUrl = await QRCode.toDataURL(qr, { width: 280, margin: 1 });
+          if (wa.sock === currentSocket) {
+            wa.qrDataUrl = qrDataUrl;
+            wa.state = 'qr';
+          }
+        } catch (e) {
+          wa.qrDataUrl = null;
+          wa.state = 'starting';
+          console.error(`[wa:${wa.userId}] QR generation failed:`, e.message);
+        }
       }
 
       if (connection === 'open') {
@@ -828,15 +845,17 @@ async function startWA(userId) {
         const code = lastDisconnect?.error?.output?.statusCode;
 
         if (code === DisconnectReason.loggedOut) {
-          wa.state = 'closed';
+          wa.state = wa.manualStop ? 'idle' : 'closed';
           wa.qrDataUrl = null;
           await clearWAAuth(wa);
           wa.reconnectDelay = 2000;
-          startWA(wa.userId).catch((e) => console.error(`[wa:${wa.userId}] fresh QR start:`, e.message));
+          if (!wa.manualStop) {
+            startWA(wa.userId).catch((e) => console.error(`[wa:${wa.userId}] fresh QR start:`, e.message));
+          }
         } else {
-          wa.state = 'starting';
+          wa.state = wa.manualStop ? 'idle' : 'starting';
           wa.qrDataUrl = null;
-          scheduleWAReconnect(wa);
+          if (!wa.manualStop) scheduleWAReconnect(wa);
         }
       }
     });
@@ -968,9 +987,6 @@ function requireAdmin(req, res, next) {
 const needWA = (req, res, next) => {
   const wa = getWA(req.user.userId);
   if (wa.state === 'connected' && wa.sock) return next();
-  if (!wa.startPromise && !wa.sock) {
-    startWA(wa.userId).catch((e) => console.error(`[wa:${wa.userId}] start:`, e.message));
-  }
   return res.status(400).json({ error: 'WhatsApp is not connected' });
 };
 
@@ -1199,15 +1215,50 @@ app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
 
 app.get('/api/status', requireAuth, async (req, res) => {
   const wa = getWA(req.user.userId);
-  if (!wa.startPromise && !wa.sock && wa.state !== 'qr' && wa.state !== 'connected') {
-    startWA(wa.userId).catch((e) => console.error(`[wa:${wa.userId}] start:`, e.message));
-  }
   res.json({
     state: wa.state,
     qr: wa.qrDataUrl,
-    canDisconnect: true,
+    canDisconnect: wa.state !== 'idle',
     owner: req.user.userId
   });
+});
+
+/* ---------- WhatsApp start / QR refresh: CURRENT USER ONLY ---------- */
+
+app.post('/api/start-wa', requireAuth, async (req, res) => {
+  const wa = getWA(req.user.userId);
+  const refresh = Boolean(req.body?.refresh);
+
+  try {
+    if (wa.state === 'connected' && wa.sock && !refresh) {
+      return res.json({ ok: true, state: wa.state });
+    }
+
+    if (refresh) {
+      clearReconnectTimer(wa);
+      wa.manualStop = true;
+
+      const current = wa.sock;
+      wa.sock = null;
+      wa.qrDataUrl = null;
+      wa.state = 'idle';
+
+      if (current) {
+        try { current.end(undefined); } catch {}
+      }
+
+      await sleep(150);
+      wa.manualStop = false;
+    }
+
+    await startWA(wa.userId);
+
+    res.json({ ok: true, state: wa.state });
+  } catch (e) {
+    wa.state = 'idle';
+    wa.qrDataUrl = null;
+    res.status(500).json({ error: 'Could not start WhatsApp: ' + e.message });
+  }
 });
 
 /* ---------- Groups ---------- */
@@ -2190,9 +2241,11 @@ app.post('/api/logout-wa', requireAuth, async (req, res) => {
   const wa = getWA(req.user.userId);
   try {
     clearReconnectTimer(wa);
+    wa.manualStop = true;
+
     const current = wa.sock;
     wa.sock = null;
-    wa.state = 'closed';
+    wa.state = 'idle';
     wa.qrDataUrl = null;
     wa.groupCache = { at: 0, data: null };
     wa.codeCache.clear();
@@ -2200,11 +2253,11 @@ app.post('/api/logout-wa', requireAuth, async (req, res) => {
 
     if (current) {
       try { await current.logout(); } catch {}
+      try { current.end(undefined); } catch {}
     }
 
     await clearWAAuth(wa);
     wa.reconnectDelay = 2000;
-    startWA(wa.userId).catch((e) => console.error(`[wa:${wa.userId}] manual reconnect:`, e.message));
 
     res.json({ ok: true });
   } catch (e) {
@@ -2215,6 +2268,21 @@ app.post('/api/logout-wa', requireAuth, async (req, res) => {
 /* ---------- Live group stats ---------- */
 
 registerStatsRoutes(app, requireAuth, needWA, getStats);
+
+
+/* ---------- Dashboard / Page Routes ---------- */
+
+app.get('/', (req, res) => {
+  res.sendFile('dashboard.html', { root: 'public' });
+});
+
+app.get('/dashboard.html', (req, res) => {
+  res.sendFile('dashboard.html', { root: 'public' });
+});
+
+app.get('/link-organizer.html', (req, res) => {
+  res.sendFile('link-organizer.html', { root: 'public' });
+});
 
 /* ---------- Static files ---------- */
 

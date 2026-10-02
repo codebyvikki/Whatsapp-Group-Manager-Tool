@@ -3,42 +3,25 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>WhatsApp Group Manager</title>
-
+<title>Link Organizer</title>
 <style>
+
+  
   :root {
-    --bg: #f6f8f7;
+    --bg: #f7faf8;
     --card: #ffffff;
-    --surface: #f8faf9;
-    --ink: #17221c;
-    --muted: #6b7770;
+    --surface: #fbfdfc;
+    --ink: #17211b;
+    --muted: #66736c;
     --brand: #128c55;
     --brand-dark: #0b7144;
-    --brand-soft: #e8f6ef;
-    --line: #e1e7e3;
-    --danger: #c62828;
-    --danger-soft: #fff0f0;
+    --brand-soft: #eaf8f2;
+    --line: #dfe7e2;
+    --danger: #b42318;
+    --danger-soft: #fff4f2;
     --warning: #9a6700;
-    --shadow: 0 8px 30px rgba(18, 35, 27, .06);
+    --shadow: 0 5px 18px rgba(20,40,30,.06);
     --radius: 14px;
-  }
-
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #0d1410;
-      --card: #151e19;
-      --surface: #1a251f;
-      --ink: #e8f0eb;
-      --muted: #98a69d;
-      --brand: #38c982;
-      --brand-dark: #2baa6d;
-      --brand-soft: #153c2b;
-      --line: #29362f;
-      --danger: #ff8a80;
-      --danger-soft: #351b1b;
-      --warning: #e7bd5a;
-      --shadow: 0 8px 30px rgba(0, 0, 0, .2);
-    }
   }
 
   * {
@@ -57,7 +40,7 @@
     color: var(--ink);
     font: 15px/1.55 system-ui, -apple-system, BlinkMacSystemFont,
       "Segoe UI", "Noto Sans", sans-serif;
-    padding: 28px 18px 50px;
+    padding: 22px 18px 40px;
   }
 
   button,
@@ -101,7 +84,7 @@
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    gap: 8px;
+    gap: 16px;
     flex-wrap: wrap;
   }
 
@@ -124,9 +107,24 @@
   }
 
   .header-btn {
-    min-height: 34px;
-    padding: 7px 11px;
-    font-size: .78rem;
+    min-height: 42px;
+    padding: 9px 16px;
+    font-size: .86rem;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 10px;
+    border: 1px solid var(--brand);
+    background: transparent;
+    color: var(--brand);
+    font-weight: 700;
+  }
+
+  .header-btn:hover {
+    background: var(--brand);
+    color: #fff;
+    border-color: var(--brand);
   }
 
   .brand {
@@ -199,32 +197,75 @@
     display: inline-flex;
     align-items: center;
     gap: 7px;
-    padding: 6px 10px;
-    border-radius: 999px;
-    background: var(--surface);
-    border: 1px solid var(--line);
+    padding: 0;
+    margin: 0;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
     color: var(--muted);
     font-size: .78rem;
-    font-weight: 600;
+    font-weight: 700;
     white-space: nowrap;
   }
 
   .status-dot {
-    width: 7px;
-    height: 7px;
+    width: 9px;
+    height: 9px;
+    flex: 0 0 9px;
     border-radius: 50%;
     background: var(--muted);
   }
 
-  .status.connected {
-    background: var(--brand-soft);
+  /* Connected */
+
+  .status.live {
     color: var(--brand);
-    border-color: rgba(18,140,85,.2);
+    background: transparent;
+    border: 0;
   }
 
-  .status.connected .status-dot {
+  .status.live .status-dot {
     background: var(--brand);
+    animation: pulse 1.8s ease-out infinite;
   }
+
+  /* Disconnected */
+
+  .status.disconnected {
+    color: var(--danger);
+    background: transparent;
+    border: 0;
+  }
+
+  .status.disconnected .status-dot {
+    background: var(--danger);
+    animation: pulse-red 1.8s ease-out infinite;
+  }
+
+  /* Green pulse */
+
+  @keyframes pulse {
+    0% {
+      box-shadow: 0 0 0 0 rgba(18, 140, 85, .45);
+    }
+
+    100% {
+      box-shadow: 0 0 0 7px rgba(18, 140, 85, 0);
+    }
+  }
+
+  /* Red pulse */
+
+  @keyframes pulse-red {
+    0% {
+      box-shadow: 0 0 0 0 rgba(198, 40, 40, .45);
+    }
+
+    100% {
+      box-shadow: 0 0 0 7px rgba(198, 40, 40, 0);
+    }
+  }
+
 
   /* ---------------- Forms ---------------- */
 
@@ -1064,190 +1105,38 @@
       flex-direction: column;
     }
   }
+
 </style>
 </head>
-
 <body>
-
 <main>
-
-  <!-- ==================== APP HEADER ==================== -->
-
+  <!-- ==================== TOOL HEADER ==================== -->
   <header class="app-header">
     <div class="brand">
-      <div class="brand-icon">WG</div>
-
+      <div class="brand-icon">LO</div>
       <div class="brand-text">
-        <h1>WhatsApp Group Manager</h1>
-        <p>Manage groups, links, permissions and stats</p>
+        <h1>Link Organizer</h1>
+        <p>Find, organize and export your WhatsApp group links</p>
       </div>
     </div>
 
     <div class="account-bar">
-      <div class="account-user" id="accountBar" hidden>
-        <span>●</span>
-        <span id="accountName">Account</span>
-        <span class="account-role" id="accountRole">User</span>
-      </div>
 
-      <a
-        class="ghost header-btn"
-        id="statsLink"
-        href="/stats.html"
-        hidden
-        style="text-decoration:none;display:inline-flex;align-items:center;"
-      >Live Stats</a>
+      <a class="header-btn" href="/dashboard.html">
+        Dashboard
+      </a>
 
-      <a
-        class="ghost header-btn"
-        id="permissionsLink"
-        href="/permissions.html"
-        hidden
-        style="text-decoration:none;display:inline-flex;align-items:center;"
-      >Group Permissions</a>
-
-      <a
-        class="ghost header-btn"
-        id="groupNamesLink"
-        href="/group-names.html"
-        hidden
-        style="text-decoration:none;display:inline-flex;align-items:center;"
-      >Group Names</a>
-
-      <a
-        class="ghost header-btn"
-        id="adminLink"
-        href="/admin.html"
-        hidden
-        style="text-decoration:none;display:inline-flex;align-items:center;"
-      >Admin</a>
-
-      <button class="ghost header-btn" id="logoutBtn" hidden>
-        Sign Out
-      </button>
-
-      <div class="status" id="headerStatus">
+      <div class="status disconnected" id="waStatus">
         <span class="status-dot"></span>
-        <span id="headerStatusText">Disconnected</span>
+        <span id="waText">Disconnected</span>
       </div>
+
     </div>
   </header>
 
-
-  <!-- ==================== LOGIN ==================== -->
-
-  <section id="login" hidden>
-
-    <div class="login-icon">↪</div>
-
-    <div>
-      <h2 class="section-title">Welcome back</h2>
-      <p class="section-description">
-        Sign in to access your group management dashboard.
-      </p>
-    </div>
-
-    <div class="login-form">
-
-      <label>
-        Username
-        <input
-          id="u"
-          autocomplete="username"
-          placeholder="Enter your username"
-        >
-      </label>
-
-      <label>
-        Password
-        <div class="password-wrap">
-          <input
-            id="p"
-            type="password"
-            autocomplete="current-password"
-            placeholder="Enter your password"
-          >
-          <button
-            type="button"
-            class="password-toggle"
-            id="togglePassword"
-            aria-label="Show password"
-            aria-pressed="false"
-          >
-            <svg class="eye-icon" viewBox="0 0 24 24" aria-hidden="true">
-              <g class="eye-shape">
-                <path d="M2.1 12s3.5-6 9.9-6 9.9 6 9.9 6-3.5 6-9.9 6-9.9-6-9.9-6Z"></path>
-                <circle cx="12" cy="12" r="2.6"></circle>
-              </g>
-              <path class="eye-slash" d="M3.2 3.2 20.8 20.8"></path>
-            </svg>
-          </button>
-        </div>
-      </label>
-
-      <button id="loginBtn">
-        Sign In
-      </button>
-
-      <div class="err" id="loginErr"></div>
-
-    </div>
-  </section>
-
-
-  <!-- ==================== CONNECTION ==================== -->
-
-  <section id="connect" hidden>
-
-    <div class="section-header">
-
-      <div>
-        <h2 class="section-title">WhatsApp Connection</h2>
-
-        <p class="section-description">
-          Connect your WhatsApp account to access your groups.
-        </p>
-      </div>
-
-      <div class="status" id="connectionStatus">
-        <span class="status-dot"></span>
-        <span>Connecting</span>
-      </div>
-
-    </div>
-
-    <div class="connection-box">
-
-      <div id="connMsg" class="connection-message">
-        Checking WhatsApp connection...
-      </div>
-
-      <button
-        class="ghost danger-btn"
-        id="unlink"
-        hidden
-      >
-        Disconnect WhatsApp
-      </button>
-
-      <div class="qr" id="qrBox" hidden>
-
-        <img id="qrImg" alt="WhatsApp QR code">
-
-        <div class="qr-instruction">
-          Open WhatsApp → Linked Devices → Link a Device → Scan this QR code
-        </div>
-
-      </div>
-
-    </div>
-
-  </section>
-
-
   <!-- ==================== MAIN TOOL ==================== -->
 
-  <section id="tool" hidden>
+  <section id="tool">
 
     <div class="section-header">
 
@@ -1590,13 +1479,13 @@
 
   </section>
 
-</main>
 
+</main>
 <footer class="app-footer">
   Developed by <span>Vikki Prime</span>
 </footer>
-
 <script>
+
 
 const $ = (id) => document.getElementById(id);
 
@@ -1647,6 +1536,7 @@ const esc = (s) =>
   );
 
 
+
 let groups = [];
 let lists = [];
 let lastResults = [];
@@ -1656,228 +1546,84 @@ let format = 'full';
 
 const selected = new Set();
 
-
 /* =========================================================
-   LOGIN / STATUS
+   LIVE WHATSAPP STATUS
+   - Connected / Disconnected only
+   - Connecting is intentionally hidden
+   - Does not affect Link Organizer functionality
 ========================================================= */
 
-async function boot() {
+let waStatusTimer = null;
 
-  try {
-    const me = await api('/api/me');
+function updateWaStatus(state) {
+  const status = $('waStatus');
+  const text = $('waText');
 
-    if (!me.loggedIn) {
-
-      $('login').hidden = false;
-      $('connect').hidden = true;
-      $('tool').hidden = true;
-      $('accountBar').hidden = true;
-      $('adminLink').hidden = true;
-      $('permissionsLink').hidden = true;
-      $('groupNamesLink').hidden = true;
-      $('logoutBtn').hidden = true;
-
-      updateHeaderStatus(false);
-      return;
-    }
-
-    $('login').hidden = true;
-    $('connect').hidden = false;
-    $('accountBar').hidden = false;
-    $('logoutBtn').hidden = false;
-
-    $('accountName').textContent = me.user.username;
-    $('accountRole').textContent = me.user.role === 'admin' ? 'Admin' : 'User';
-    $('adminLink').hidden = me.user.role !== 'admin';
-    $('statsLink').hidden = false;
-    $('permissionsLink').hidden = false;
-    $('groupNamesLink').hidden = false;
-
-    poll();
-
-  } catch (e) {
-    $('login').hidden = false;
-    $('connect').hidden = true;
-    $('tool').hidden = true;
-  }
-}
-
-function updateHeaderStatus(ok) {
-
-  const status = $('headerStatus');
-  const text = $('headerStatusText');
-
-  status.classList.toggle('connected', ok);
-
-  text.textContent = ok
-    ? 'WhatsApp Connected'
-    : 'Disconnected';
-}
-
-
-function updateConnectionStatus(state, canDisconnect = false) {
-
-  const status = $('connectionStatus');
-  const unlink = $('unlink');
+  if (!status || !text) return;
 
   if (state === 'connected') {
-
-    status.classList.add('connected');
-
-    status.innerHTML = `
-      <span class="status-dot"></span>
-      <span>Connected</span>
-    `;
-
-    unlink.hidden = !canDisconnect;
-
-  } else {
-
-    status.classList.remove('connected');
-
-    status.innerHTML = `
-      <span class="status-dot"></span>
-      <span>Connecting</span>
-    `;
-
-    unlink.hidden = true;
+    status.className = 'status live';
+    text.textContent = 'Connected';
+    return;
   }
+
+  status.className = 'status disconnected';
+  text.textContent = 'Disconnected';
 }
 
-async function poll() {
-
+async function refreshWaStatus() {
   try {
-
     const s = await api('/api/status');
 
-    const ok = s.state === 'connected';
-
-    $('tool').hidden = !ok;
-    $('qrBox').hidden = s.state !== 'qr';
-
-    if (s.qr) {
-      $('qrImg').src = s.qr;
-    }
-
-
-    if (ok) {
-
-      $('connMsg').textContent =
-        'WhatsApp is connected and ready to use.';
-
-      updateConnectionStatus('connected', !!s.canDisconnect);
-      updateHeaderStatus(true);
-
-    } else if (s.state === 'qr') {
-
-      $('connMsg').textContent =
-        'Scan the QR code below to connect WhatsApp.';
-
-      updateConnectionStatus('connecting');
-      updateHeaderStatus(false);
-
-    } else if (s.state === 'closed') {
-
-      $('connMsg').textContent =
-        'WhatsApp is disconnected. Starting a new connection...';
-
-      updateConnectionStatus('connecting');
-      updateHeaderStatus(false);
-    } else {
-
-      $('connMsg').textContent =
-        'Starting WhatsApp connection...';
-
-      updateConnectionStatus('connecting');
-      updateHeaderStatus(false);
-    }
-
-
-    if (ok && !connected) {
-
-      connected = true;
-
-      loadGroups();
-      loadLists();
-    }
-
-
-    if (!ok) {
-      connected = false;
-    }
-
-  } catch (e) {
-
-    if (e.status === 401) {
-      return boot();
-    }
+    updateWaStatus(
+      s && s.state === 'connected'
+        ? 'connected'
+        : 'disconnected'
+    );
+  } catch {
+    updateWaStatus('disconnected');
   }
-
-
-  setTimeout(poll, 3000);
 }
 
-$('togglePassword').onclick = (e) => {
-  e.preventDefault();
+function startWaStatusMonitor() {
+  refreshWaStatus();
 
-  const input = $('p');
-  const button = $('togglePassword');
-
-  const willShow = input.type === 'password';
-
-  input.type = willShow ? 'text' : 'password';
-
-  button.classList.toggle('is-visible', willShow);
-
-  button.setAttribute(
-    'aria-label',
-    willShow ? 'Hide password' : 'Show password'
-  );
-
-  button.setAttribute(
-    'aria-pressed',
-    willShow ? 'true' : 'false'
-  );
-};
-
-
-$('loginBtn').onclick = async () => {
-
-  $('loginErr').textContent = '';
-  $('loginBtn').disabled = true;
-
-  try {
-
-    await api('/api/login', {
-      user: $('u').value,
-      pass: $('p').value
-    });
-
-    boot();
-
-  } catch (e) {
-
-    $('loginErr').textContent = e.message;
-  } finally {
-    $('loginBtn').disabled = false;
+  if (waStatusTimer) {
+    clearInterval(waStatusTimer);
   }
-};
+
+  waStatusTimer = setInterval(
+    refreshWaStatus,
+    2500
+  );
+}
 
 
-$('logoutBtn').onclick = async () => {
-
-  $('logoutBtn').disabled = true;
-
+/* =========================================================
+   DASHBOARD SESSION GATE
+   Authentication/QR is handled by dashboard.html.
+   The Link Organizer keeps its existing API/tool behavior.
+========================================================= */
+async function requireConnectedSession(){
   try {
-    await fetch('/api/logout', {
-      method: 'POST',
-      credentials: 'same-origin'
-    });
-  } catch {}
+    const me = await api('/api/me');
+    if (!me.loggedIn) {
+      location.replace('/dashboard.html');
+      return false;
+    }
 
-  location.replace('/');
-};
+    const s = await api('/api/status');
+    if (s.state !== 'connected') {
+      location.replace('/dashboard.html');
+      return false;
+    }
 
+    return true;
+  } catch {
+    location.replace('/dashboard.html');
+    return false;
+  }
+}
 
 /* =========================================================
    TABS
@@ -2786,45 +2532,6 @@ $('dlCsv').onclick = () => {
 
 
 /* =========================================================
-   DISCONNECT
-========================================================= */
-
-$('unlink').onclick = async () => {
-
-  const confirmed = window.confirm(
-    'Disconnect your WhatsApp? This will disconnect only your WhatsApp session for this panel account.'
-  );
-  if (!confirmed) return;
-
-  $('unlink').disabled = true;
-
-  try {
-    await api(
-      '/api/logout-wa',
-      {}
-    );
-  } finally {
-    $('unlink').disabled = false;
-  }
-
-
-  $('out').hidden = true;
-
-  groups = [];
-
-  selected.clear();
-
-  connected = false;
-
-  updateHeaderStatus(false);
-
-  updateConnectionStatus(
-    'connecting'
-  );
-};
-
-
-/* =========================================================
    CLEAR OUTPUT
 ========================================================= */
 
@@ -2862,10 +2569,15 @@ $('clearOut').onclick = () => {
 /* =========================================================
    START APP
 ========================================================= */
+requireConnectedSession().then(ok => {
+  if (ok) {
+    loadGroups();
+    loadLists();
+    startWaStatusMonitor();
+  }
+});
 
-boot();
 
 </script>
-
 </body>
 </html>
