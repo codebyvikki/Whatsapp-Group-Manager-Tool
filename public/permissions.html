@@ -4,189 +4,1573 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Group Permissions</title>
+
 <style>
   :root {
-    --bg:#f6f8f7; --card:#fff; --surface:#f8faf9; --ink:#17221c; --muted:#6b7770;
-    --brand:#128c55; --brand-dark:#0b7144; --brand-soft:#e8f6ef; --line:#e1e7e3;
-    --danger:#c62828; --danger-soft:#fff0f0; --warning:#9a6700; --shadow:0 8px 30px rgba(18,35,27,.06); --radius:14px;
+    --bg:#f6f8f7;
+    --card:#fff;
+    --surface:#f8faf9;
+    --ink:#17221c;
+    --muted:#6b7770;
+    --brand:#128c55;
+    --brand-dark:#0b7144;
+    --brand-soft:#e8f6ef;
+    --line:#e1e7e3;
+    --danger:#c62828;
+    --danger-soft:#fff0f0;
+    --warning:#9a6700;
+    --shadow:0 8px 30px rgba(18,35,27,.06);
+    --radius:14px;
   }
-  @media (prefers-color-scheme:dark){
-    :root{--bg:#0d1410;--card:#151e19;--surface:#1a251f;--ink:#e8f0eb;--muted:#98a69d;--brand:#38c982;--brand-dark:#2baa6d;--brand-soft:#153c2b;--line:#29362f;--danger:#ff8a80;--danger-soft:#351b1b;--warning:#e7bd5a;--shadow:0 8px 30px rgba(0,0,0,.2)}
+
+  *{
+    box-sizing:border-box;
   }
-  *{box-sizing:border-box}
-  body{margin:0;background:radial-gradient(circle at top right,rgba(18,140,85,.07),transparent 30%),var(--bg);color:var(--ink);font:15px/1.55 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",sans-serif;padding:28px 18px 50px}
-  button,input{font:inherit} button{cursor:pointer} button:disabled{opacity:.55;cursor:not-allowed}
-  :focus-visible{outline:3px solid rgba(18,140,85,.25);outline-offset:2px}
-  main{width:min(980px,100%);margin:0 auto;display:grid;gap:18px}
-  .app-header{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:4px 2px 10px}
-  .brand{display:flex;align-items:center;gap:13px}
-  .brand-icon {
-    width: 50px;
-    height: 50px;
-    flex: 0 0 50px;
-    display: grid;
-    place-items: center;
-    border-radius: 14px;
-    background: var(--brand);
-    color: #fff;
-    font-size: 22px;
-    font-weight: 800;
-    box-shadow: 0 6px 18px rgba(18,140,85,.22);
+
+  html,
+  body{
+    min-height:100%;
   }
-  .brand-text h1{margin:0;font-size:1.35rem;letter-spacing:-.02em}.brand-text p{margin:2px 0 0;color:var(--muted);font-size:.85rem}
-  .account-bar{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}.account-user{display:inline-flex;align-items:center;gap:7px;padding:6px 10px;border:1px solid var(--line);border-radius:999px;background:var(--surface);font-size:.78rem;font-weight:700}.account-role{color:var(--muted);font-weight:600}
-  .header-btn{min-height:34px;padding:7px 11px;font-size:.78rem;text-decoration:none;display:inline-flex;align-items:center}
-  section{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:22px;display:grid;gap:16px;box-shadow:var(--shadow)}
-  .section-header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.section-title{margin:0;font-size:1.05rem;font-weight:700;letter-spacing:-.01em}.section-description{margin:3px 0 0;color:var(--muted);font-size:.86rem}
-  .section-actions{display:flex;align-items:center;justify-content:flex-end;gap:9px;flex-wrap:wrap}.status{display:inline-flex;align-items:center;gap:7px;padding:6px 10px;border-radius:999px;background:var(--surface);border:1px solid var(--line);color:var(--muted);font-size:.78rem;font-weight:600;white-space:nowrap}.status-dot{width:7px;height:7px;border-radius:50%;background:var(--muted)}.status.connected{background:var(--brand-soft);color:var(--brand);border-color:rgba(18,140,85,.2)}.status.connected .status-dot{background:var(--brand)}
-  .toolbar{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px}.range-grid{display:grid;grid-template-columns:minmax(0,1fr) 140px 140px auto;gap:10px;align-items:end}
-  label{display:grid;gap:7px;color:var(--muted);font-size:.83rem;font-weight:600}input{width:100%;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);padding:11px 13px;outline:none}input:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(18,140,85,.1);background:var(--card)}
-  button{min-height:42px;border:1px solid transparent;border-radius:10px;padding:10px 15px;background:var(--brand);color:#fff;font-weight:700;transition:background .15s,transform .1s,box-shadow .15s,border-color .15s}button:hover:not(:disabled){background:var(--brand-dark);box-shadow:0 5px 14px rgba(18,140,85,.18)}button:active:not(:disabled){transform:translateY(1px)}button.ghost{background:transparent;color:var(--ink);border-color:var(--line);box-shadow:none}button.ghost:hover:not(:disabled){background:var(--surface);border-color:#cbd5cf;box-shadow:none}button.small{min-height:34px;padding:7px 10px;font-size:.78rem;border-radius:8px}
-  .selection-meta{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;color:var(--muted);font-size:.8rem}.selection-meta strong{color:var(--ink)}
-  .list{max-height:370px;overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--surface)}.group-row{display:grid;grid-template-columns:26px minmax(0,1fr) auto;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line)}.group-row:last-child{border-bottom:0}.group-row:hover{background:var(--card)}.group-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:650}.group-sub{color:var(--muted);font-size:.73rem;margin-top:1px}.group-check{width:18px;height:18px;accent-color:var(--brand)}.empty{padding:28px;text-align:center;color:var(--muted)}
-  .range-info{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 12px;border-radius:10px;background:var(--surface);border:1px solid var(--line);font-size:.8rem;color:var(--muted)}.range-info strong{color:var(--ink)}.range-info.warning{border-color:rgba(154,103,0,.28);color:var(--warning);background:color-mix(in srgb,var(--warning) 7%,var(--surface))}
-  .permission-grid{display:grid;gap:10px}.permission-heading{margin:2px 0 0;font-size:.86rem;color:var(--muted);font-weight:700}.permission-row{display:grid;grid-template-columns:46px minmax(0,1fr) auto;align-items:center;gap:12px;padding:13px 12px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}.permission-icon{width:36px;height:36px;display:grid;place-items:center;border-radius:10px;background:var(--brand-soft);color:var(--brand);font-weight:800}.permission-name{font-weight:700}.permission-desc{color:var(--muted);font-size:.76rem;margin-top:2px}.permission-state{color:var(--muted);font-size:.73rem;font-weight:700;text-align:right;min-width:62px}.switch{position:relative;width:58px;height:34px;display:inline-flex;align-items:center;padding:0;border:0;border-radius:999px;background:#9ba5a0;box-shadow:none}.switch:hover:not(:disabled){background:#8e9993;box-shadow:none}.switch::after{content:"";width:26px;height:26px;border-radius:50%;background:#fff;position:absolute;left:4px;top:4px;box-shadow:0 2px 6px rgba(0,0,0,.2);transition:transform .15s}.switch.on{background:var(--brand)}.switch.on:hover:not(:disabled){background:var(--brand-dark)}.switch.on::after{transform:translateX(24px)}.switch.mixed{background:#8e9993}.switch.mixed::after{transform:translateX(12px)}.switch.mixed::before{content:"";position:absolute;left:12px;right:12px;top:16px;height:2px;background:#fff;border-radius:2px;z-index:2}.switch.unsupported{background:#b6bfba}
-  .pending{display:none;padding:13px 14px;border:1px solid rgba(18,140,85,.2);border-radius:12px;background:var(--brand-soft)}.pending.show{display:grid;gap:10px}.pending-title{font-weight:750}.pending-list{display:flex;gap:7px;flex-wrap:wrap}.chip{padding:5px 8px;border-radius:999px;background:var(--card);border:1px solid var(--line);font-size:.74rem;font-weight:700}.apply-bar{display:flex;justify-content:center;gap:10px;flex-wrap:wrap;padding-top:4px}.apply-bar button{min-width:210px}
-  .progress-wrap{display:none;gap:10px}.progress-wrap.show{display:grid}.progress-line{height:10px;border-radius:999px;background:var(--surface);border:1px solid var(--line);overflow:hidden}.progress-fill{height:100%;width:0;background:var(--brand);transition:width .2s}.progress-text{display:flex;justify-content:space-between;gap:10px;color:var(--muted);font-size:.8rem}
-  .result{display:none}.result.show{display:grid;gap:10px}.result-summary{display:flex;gap:8px;flex-wrap:wrap}.result-pill{padding:6px 9px;border-radius:999px;background:var(--surface);border:1px solid var(--line);font-size:.76rem;font-weight:700}.result-pill.ok{color:var(--brand)}.result-pill.fail{color:var(--danger)}.result-list{max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:10px}.result-row{display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid var(--line);font-size:.78rem}.result-row:last-child{border-bottom:0}.result-ok{color:var(--brand)}.result-fail{color:var(--danger)}
-  .notice{padding:11px 13px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--muted);font-size:.8rem}.notice strong{color:var(--ink)}.notice.warning{border-color:rgba(154,103,0,.28);color:var(--warning)}
-  #loading,#accessDenied{padding:34px;text-align:center;color:var(--muted)}#app{display:none}.hidden{display:none!important}
-  @media(max-width:760px){body{padding:18px 12px 36px}.app-header{align-items:flex-start}.account-bar{justify-content:flex-end}.range-grid{grid-template-columns:1fr 1fr}.range-grid label:first-child{grid-column:1/-1}.range-grid button{grid-column:1/-1}.toolbar{grid-template-columns:1fr}.permission-row{grid-template-columns:40px minmax(0,1fr) auto}.permission-state{display:none}}
-  @media(max-width:520px){.app-header{flex-direction:column}.account-bar{width:100%;justify-content:flex-start}.brand-text h1{font-size:1.18rem}.range-grid{grid-template-columns:1fr}.range-grid label:first-child{grid-column:auto}.range-grid button{grid-column:auto}.section-actions{justify-content:flex-start}.apply-bar button{width:100%}}
+
+  body{
+    margin:0;
+    background:
+      radial-gradient(
+        circle at top right,
+        rgba(18,140,85,.07),
+        transparent 30%
+      ),
+      var(--bg);
+    color:var(--ink);
+    font:15px/1.55 system-ui,-apple-system,BlinkMacSystemFont,
+      "Segoe UI","Noto Sans",sans-serif;
+    padding:28px 18px 50px;
+  }
+
+  button,
+  input{
+    font:inherit;
+  }
+
+  button{
+    cursor:pointer;
+  }
+
+  button:disabled{
+    opacity:.55;
+    cursor:not-allowed;
+  }
+
+  :focus-visible{
+    outline:3px solid rgba(18,140,85,.25);
+    outline-offset:2px;
+  }
+
+  main{
+    width:min(980px,100%);
+    margin:0 auto;
+    display:grid;
+    gap:18px;
+  }
+
+
+  /* =========================================================
+     HEADER
+     ========================================================= */
+
+  .app-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:18px;
+    padding:4px 2px 10px;
+  }
+
+  .brand{
+    display:flex;
+    align-items:center;
+    gap:13px;
+  }
+
+  .brand-icon{
+    width:50px;
+    height:50px;
+    flex:0 0 50px;
+    display:grid;
+    place-items:center;
+    border-radius:14px;
+    background:var(--brand);
+    color:#fff;
+    font-size:22px;
+    font-weight:800;
+    box-shadow:0 6px 18px rgba(18,140,85,.22);
+  }
+
+  .brand-text h1{
+    margin:0;
+    font-size:1.35rem;
+    letter-spacing:-.02em;
+  }
+
+  .brand-text p{
+    margin:2px 0 0;
+    color:var(--muted);
+    font-size:.85rem;
+  }
+
+  .account-bar{
+    display:flex;
+    align-items:center;
+    justify-content:flex-end;
+    gap:12px;
+    flex-wrap:wrap;
+  }
+
+
+  /* =========================================================
+     HIDDEN JS COMPATIBILITY HOOKS
+     ---------------------------------------------------------
+     permissions.js still expects these IDs.
+     They remain in DOM but are not visible.
+     ========================================================= */
+
+  .js-hook-hidden{
+    display:none !important;
+  }
+
+
+  /* =========================================================
+     DASHBOARD BUTTON
+     ========================================================= */
+
+  .header-btn{
+    min-height:42px;
+    padding:9px 14px;
+    font-size:.78rem;
+    text-decoration:none;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    border:1px solid var(--brand);
+    border-radius:10px;
+    background:transparent;
+    color:var(--brand);
+    font-weight:700;
+    transition:
+      background .15s ease,
+      color .15s ease,
+      box-shadow .15s ease,
+      border-color .15s ease,
+      transform .1s ease;
+  }
+
+  .dashboard-btn{
+    background:transparent;
+    color:var(--brand);
+    border-color:var(--brand);
+  }
+
+  .dashboard-btn:hover{
+    background:var(--brand);
+    color:#fff;
+    border-color:var(--brand);
+    box-shadow:0 5px 14px rgba(18,140,85,.18);
+  }
+
+  .dashboard-btn:active{
+    transform:translateY(1px);
+  }
+
+
+  /* =========================================================
+     LIVE WHATSAPP STATUS
+     ========================================================= */
+
+  .status{
+    display:inline-flex;
+    align-items:center;
+    gap:7px;
+    padding:0;
+    margin:0;
+    background:transparent;
+    border:0;
+    border-radius:0;
+    color:var(--muted);
+    font-size:.78rem;
+    font-weight:700;
+    white-space:nowrap;
+  }
+
+  .status-dot{
+    width:9px;
+    height:9px;
+    flex:0 0 9px;
+    border-radius:50%;
+    background:#a6b0ab;
+  }
+
+  .status.connected{
+    color:var(--brand);
+    background:transparent;
+    border:0;
+  }
+
+  .status.connected .status-dot{
+    background:var(--brand);
+    animation:pulse 1.8s ease-out infinite;
+  }
+
+  .status.disconnected{
+    color:var(--danger);
+    background:transparent;
+    border:0;
+  }
+
+  .status.disconnected .status-dot{
+    background:var(--danger);
+    animation:pulse-red 1.8s ease-out infinite;
+  }
+
+  @keyframes pulse{
+    0%{
+      box-shadow:0 0 0 0 rgba(18,140,85,.45);
+    }
+
+    100%{
+      box-shadow:0 0 0 7px rgba(18,140,85,0);
+    }
+  }
+
+  @keyframes pulse-red{
+    0%{
+      box-shadow:0 0 0 0 rgba(180,35,24,.45);
+    }
+
+    100%{
+      box-shadow:0 0 0 7px rgba(180,35,24,0);
+    }
+  }
+
+
+  /* =========================================================
+     MAIN SECTIONS
+     ========================================================= */
+
+  section{
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:22px;
+    display:grid;
+    gap:16px;
+    box-shadow:var(--shadow);
+  }
+
+  .section-header{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:12px;
+  }
+
+  .section-title{
+    margin:0;
+    font-size:1.05rem;
+    font-weight:700;
+    letter-spacing:-.01em;
+  }
+
+  .section-description{
+    margin:3px 0 0;
+    color:var(--muted);
+    font-size:.86rem;
+  }
+
+  .section-actions{
+    display:flex;
+    align-items:center;
+    justify-content:flex-end;
+    gap:9px;
+    flex-wrap:wrap;
+  }
+
+
+  /* =========================================================
+     TOOLBAR / INPUTS
+     ========================================================= */
+
+  .toolbar{
+    display:grid;
+    grid-template-columns:minmax(0,1fr) auto;
+    gap:10px;
+  }
+
+  .range-grid{
+    display:grid;
+    grid-template-columns:minmax(0,1fr) 140px 140px auto;
+    gap:10px;
+    align-items:end;
+  }
+
+  label{
+    display:grid;
+    gap:7px;
+    color:var(--muted);
+    font-size:.83rem;
+    font-weight:600;
+  }
+
+  input{
+    width:100%;
+    border:1px solid var(--line);
+    border-radius:10px;
+    background:var(--surface);
+    color:var(--ink);
+    padding:11px 13px;
+    outline:none;
+  }
+
+  input:focus{
+    border-color:var(--brand);
+    box-shadow:0 0 0 3px rgba(18,140,85,.1);
+    background:var(--card);
+  }
+
+
+  /* =========================================================
+     BUTTONS
+     ========================================================= */
+
+  button{
+    min-height:42px;
+    border:1px solid transparent;
+    border-radius:10px;
+    padding:10px 15px;
+    background:var(--brand);
+    color:#fff;
+    font-weight:700;
+    transition:
+      background .15s,
+      transform .1s,
+      box-shadow .15s,
+      border-color .15s;
+  }
+
+  button:hover:not(:disabled){
+    background:var(--brand-dark);
+    box-shadow:0 5px 14px rgba(18,140,85,.18);
+  }
+
+  button:active:not(:disabled){
+    transform:translateY(1px);
+  }
+
+  button.ghost{
+    background:transparent;
+    color:var(--ink);
+    border-color:var(--line);
+    box-shadow:none;
+  }
+
+  button.ghost:hover:not(:disabled){
+    background:var(--surface);
+    border-color:#cbd5cf;
+    box-shadow:none;
+  }
+
+  button.small{
+    min-height:34px;
+    padding:7px 10px;
+    font-size:.78rem;
+    border-radius:8px;
+  }
+
+
+  /* =========================================================
+     SELECTION
+     ========================================================= */
+
+  .selection-meta{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+    color:var(--muted);
+    font-size:.8rem;
+  }
+
+  .selection-meta strong{
+    color:var(--ink);
+  }
+
+  .list{
+    max-height:370px;
+    overflow:auto;
+    border:1px solid var(--line);
+    border-radius:12px;
+    background:var(--surface);
+  }
+
+  .group-row{
+    display:grid;
+    grid-template-columns:26px minmax(0,1fr) auto;
+    align-items:center;
+    gap:10px;
+    padding:10px 12px;
+    border-bottom:1px solid var(--line);
+  }
+
+  .group-row:last-child{
+    border-bottom:0;
+  }
+
+  .group-row:hover{
+    background:var(--card);
+  }
+
+  .group-name{
+    min-width:0;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+    font-weight:650;
+  }
+
+  .group-sub{
+    color:var(--muted);
+    font-size:.73rem;
+    margin-top:1px;
+  }
+
+  .group-check{
+    width:18px;
+    height:18px;
+    accent-color:var(--brand);
+  }
+
+  .empty{
+    padding:28px;
+    text-align:center;
+    color:var(--muted);
+  }
+
+
+  /* =========================================================
+     RANGE INFO
+     ========================================================= */
+
+  .range-info{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    flex-wrap:wrap;
+    padding:10px 12px;
+    border-radius:10px;
+    background:var(--surface);
+    border:1px solid var(--line);
+    font-size:.8rem;
+    color:var(--muted);
+  }
+
+  .range-info strong{
+    color:var(--ink);
+  }
+
+  .range-info.warning{
+    border-color:rgba(154,103,0,.28);
+    color:var(--warning);
+    background:#fffaf0;
+  }
+
+
+  /* =========================================================
+     PERMISSIONS
+     ========================================================= */
+
+  .permission-grid{
+    display:grid;
+    gap:10px;
+  }
+
+  .permission-heading{
+    margin:2px 0 0;
+    font-size:.86rem;
+    color:var(--muted);
+    font-weight:700;
+  }
+
+  .permission-row{
+    display:grid;
+    grid-template-columns:46px minmax(0,1fr) auto;
+    align-items:center;
+    gap:12px;
+    padding:13px 12px;
+    border:1px solid var(--line);
+    border-radius:12px;
+    background:var(--surface);
+  }
+
+  .permission-icon{
+    width:36px;
+    height:36px;
+    display:grid;
+    place-items:center;
+    border-radius:10px;
+    background:var(--brand-soft);
+    color:var(--brand);
+    font-weight:800;
+  }
+
+  .permission-name{
+    font-weight:700;
+  }
+
+  .permission-desc{
+    color:var(--muted);
+    font-size:.76rem;
+    margin-top:2px;
+  }
+
+  .permission-state{
+    color:var(--muted);
+    font-size:.73rem;
+    font-weight:700;
+    text-align:right;
+    min-width:62px;
+  }
+
+
+  /* =========================================================
+     SWITCHES
+     ========================================================= */
+
+  .switch{
+    position:relative;
+    width:58px;
+    height:34px;
+    display:inline-flex;
+    align-items:center;
+    padding:0;
+    border:0;
+    border-radius:999px;
+    background:#9ba5a0;
+    box-shadow:none;
+  }
+
+  .switch:hover:not(:disabled){
+    background:#8e9993;
+    box-shadow:none;
+  }
+
+  .switch::after{
+    content:"";
+    width:26px;
+    height:26px;
+    border-radius:50%;
+    background:#fff;
+    position:absolute;
+    left:4px;
+    top:4px;
+    box-shadow:0 2px 6px rgba(0,0,0,.2);
+    transition:transform .15s;
+  }
+
+  .switch.on{
+    background:var(--brand);
+  }
+
+  .switch.on:hover:not(:disabled){
+    background:var(--brand-dark);
+  }
+
+  .switch.on::after{
+    transform:translateX(24px);
+  }
+
+  .switch.mixed{
+    background:#8e9993;
+  }
+
+  .switch.mixed::after{
+    transform:translateX(12px);
+  }
+
+  .switch.mixed::before{
+    content:"";
+    position:absolute;
+    left:12px;
+    right:12px;
+    top:16px;
+    height:2px;
+    background:#fff;
+    border-radius:2px;
+    z-index:2;
+  }
+
+  .switch.unsupported{
+    background:#b6bfba;
+  }
+
+
+  /* =========================================================
+     PENDING / APPLY
+     ========================================================= */
+
+  .pending{
+    display:none;
+    padding:13px 14px;
+    border:1px solid rgba(18,140,85,.2);
+    border-radius:12px;
+    background:var(--brand-soft);
+  }
+
+  .pending.show{
+    display:grid;
+    gap:10px;
+  }
+
+  .pending-title{
+    font-weight:750;
+  }
+
+  .pending-list{
+    display:flex;
+    gap:7px;
+    flex-wrap:wrap;
+  }
+
+  .chip{
+    padding:5px 8px;
+    border-radius:999px;
+    background:var(--card);
+    border:1px solid var(--line);
+    font-size:.74rem;
+    font-weight:700;
+  }
+
+  .apply-bar{
+    display:flex;
+    justify-content:center;
+    gap:10px;
+    flex-wrap:wrap;
+    padding-top:4px;
+  }
+
+  .apply-bar button{
+    min-width:210px;
+  }
+
+
+  /* =========================================================
+     PROGRESS
+     ========================================================= */
+
+  .progress-wrap{
+    display:none;
+    gap:10px;
+  }
+
+  .progress-wrap.show{
+    display:grid;
+  }
+
+  .progress-line{
+    height:10px;
+    border-radius:999px;
+    background:var(--surface);
+    border:1px solid var(--line);
+    overflow:hidden;
+  }
+
+  .progress-fill{
+    height:100%;
+    width:0;
+    background:var(--brand);
+    transition:width .2s;
+  }
+
+  .progress-text{
+    display:flex;
+    justify-content:space-between;
+    gap:10px;
+    color:var(--muted);
+    font-size:.8rem;
+  }
+
+
+  /* =========================================================
+     RESULTS
+     ========================================================= */
+
+  .result{
+    display:none;
+  }
+
+  .result.show{
+    display:grid;
+    gap:10px;
+  }
+
+  .result-summary{
+    display:flex;
+    gap:8px;
+    flex-wrap:wrap;
+  }
+
+  .result-pill{
+    padding:6px 9px;
+    border-radius:999px;
+    background:var(--surface);
+    border:1px solid var(--line);
+    font-size:.76rem;
+    font-weight:700;
+  }
+
+  .result-pill.ok{
+    color:var(--brand);
+  }
+
+  .result-pill.fail{
+    color:var(--danger);
+  }
+
+  .result-list{
+    max-height:260px;
+    overflow:auto;
+    border:1px solid var(--line);
+    border-radius:10px;
+  }
+
+  .result-row{
+    display:grid;
+    grid-template-columns:18px minmax(0,1fr) auto;
+    gap:8px;
+    align-items:center;
+    padding:8px 10px;
+    border-bottom:1px solid var(--line);
+    font-size:.78rem;
+  }
+
+  .result-row:last-child{
+    border-bottom:0;
+  }
+
+  .result-ok{
+    color:var(--brand);
+  }
+
+  .result-fail{
+    color:var(--danger);
+  }
+
+
+  /* =========================================================
+     NOTICES
+     ========================================================= */
+
+  .notice{
+    padding:11px 13px;
+    border-radius:10px;
+    border:1px solid var(--line);
+    background:var(--surface);
+    color:var(--muted);
+    font-size:.8rem;
+  }
+
+  .notice strong{
+    color:var(--ink);
+  }
+
+  .notice.warning{
+    border-color:rgba(154,103,0,.28);
+    color:var(--warning);
+  }
+
+
+  /* =========================================================
+     LOADING / ACCESS
+     ========================================================= */
+
+  #loading,
+  #accessDenied{
+    padding:34px;
+    text-align:center;
+    color:var(--muted);
+  }
+
+  #app{
+    display:none;
+  }
+
+  .hidden{
+    display:none !important;
+  }
+
+
+  /* =========================================================
+     MOBILE
+     ========================================================= */
+
+  @media(max-width:760px){
+
+    body{
+      padding:18px 12px 36px;
+    }
+
+    .app-header{
+      align-items:flex-start;
+    }
+
+    .account-bar{
+      justify-content:flex-end;
+    }
+
+    .range-grid{
+      grid-template-columns:1fr 1fr;
+    }
+
+    .range-grid label:first-child{
+      grid-column:1/-1;
+    }
+
+    .range-grid button{
+      grid-column:1/-1;
+    }
+
+    .toolbar{
+      grid-template-columns:1fr;
+    }
+
+    .permission-row{
+      grid-template-columns:40px minmax(0,1fr) auto;
+    }
+
+    .permission-state{
+      display:none;
+    }
+  }
+
+
+  @media(max-width:520px){
+
+    .app-header{
+      flex-direction:column;
+    }
+
+    .account-bar{
+      width:100%;
+      justify-content:flex-start;
+    }
+
+    .brand-text h1{
+      font-size:1.18rem;
+    }
+
+    .range-grid{
+      grid-template-columns:1fr;
+    }
+
+    .range-grid label:first-child{
+      grid-column:auto;
+    }
+
+    .range-grid button{
+      grid-column:auto;
+    }
+
+    .section-actions{
+      justify-content:flex-start;
+    }
+
+    .apply-bar button{
+      width:100%;
+    }
+  }
 </style>
 </head>
+
 <body>
+
 <main>
+
+  <!-- =====================================================
+       HEADER
+       ====================================================== -->
+
   <header class="app-header">
+
     <div class="brand">
-      <div class="brand-icon">WG</div>
+
+      <div class="brand-icon">
+        WG
+      </div>
+
       <div class="brand-text">
         <h1>Group Permissions</h1>
         <p>Bulk manage WhatsApp group permissions</p>
       </div>
+
     </div>
+
+
+    <!-- RIGHT SIDE -->
+
     <div class="account-bar">
-      <div class="account-user"><span>●</span><span id="accountName">Account</span><span class="account-role">User</span></div>
-      <a class="ghost header-btn" href="/">WhatsApp Group Manager</a>
-      <a class="ghost header-btn" href="/stats.html">Live Stats</a>
-      <button class="ghost header-btn" id="signOut">Sign Out</button>
-      <div class="status" id="waStatus"><span class="status-dot"></span><span id="waStatusText">Checking WhatsApp…</span></div>
+
+      <!--
+        Hidden compatibility hooks.
+        permissions.js still gets the elements it expects.
+        They are intentionally invisible.
+      -->
+
+      <div class="account-user js-hook-hidden">
+        <span>●</span>
+        <span id="accountName">Account</span>
+        <span class="account-role">User</span>
+      </div>
+
+      <button
+        class="ghost header-btn js-hook-hidden"
+        id="signOut"
+        type="button"
+      >
+        Sign Out
+      </button>
+
+
+      <!-- Dashboard -->
+
+      <a
+        class="header-btn dashboard-btn"
+        href="/dashboard.html"
+      >
+        Dashboard
+      </a>
+
+
+      <!-- Live WhatsApp status -->
+
+      <div
+        class="status disconnected"
+        id="waStatus"
+      >
+        <span class="status-dot"></span>
+
+        <span id="waStatusText">
+          Disconnected
+        </span>
+      </div>
+
     </div>
+
   </header>
 
-  <div id="loading">Loading Group Permissions…</div>
-  <section id="accessDenied" class="hidden">
-    <h2 class="section-title">Group Permissions unavailable</h2>
-    <p class="section-description">Please sign in with a valid panel account to use Group Permissions.</p>
-    <div><a class="ghost header-btn" href="/">Back to WhatsApp Group Manager</a></div>
+
+  <!-- =====================================================
+       LOADING
+       ====================================================== -->
+
+  <div id="loading">
+    Loading Group Permissions…
+  </div>
+
+
+  <!-- =====================================================
+       ACCESS DENIED
+       ====================================================== -->
+
+  <section
+    id="accessDenied"
+    class="hidden"
+  >
+
+    <h2 class="section-title">
+      Group Permissions unavailable
+    </h2>
+
+    <p class="section-description">
+      Please sign in with a valid panel account to use Group Permissions.
+    </p>
+
+    <div>
+      <a
+        class="ghost header-btn"
+        href="/"
+      >
+        Back to WhatsApp Group Manager
+      </a>
+    </div>
+
   </section>
 
+
+  <!-- =====================================================
+       MAIN APP
+       ====================================================== -->
+
   <div id="app">
+
+    <!-- ===================================================
+         1. SELECT GROUPS
+         =================================================== -->
+
     <section>
+
       <div class="section-header">
+
         <div>
-          <h2 class="section-title">1. Select groups</h2>
-          <p class="section-description">Select individual groups or use a numbered range. Only groups that actually exist on WhatsApp can be selected.</p>
+
+          <h2 class="section-title">
+            1. Select groups
+          </h2>
+
+          <p class="section-description">
+            Select individual groups or use a numbered range.
+            Only groups that actually exist on WhatsApp can be selected.
+          </p>
+
         </div>
-        <div class="section-actions"><button class="ghost small" id="refreshGroups">Refresh groups</button></div>
+
+        <div class="section-actions">
+
+          <button
+            class="ghost small"
+            id="refreshGroups"
+          >
+            Refresh groups
+          </button>
+
+        </div>
+
       </div>
+
+
+      <!-- SEARCH -->
 
       <div class="toolbar">
-        <label>Search groups
-          <input id="search" type="text" placeholder="Search by group name…" autocomplete="off">
+
+        <label>
+          Search groups
+
+          <input
+            id="search"
+            type="text"
+            placeholder="Search by group name…"
+            autocomplete="off"
+          >
+
         </label>
+
+
         <div class="section-actions">
-          <button class="ghost small" id="selectVisible">Select visible</button>
-          <button class="ghost small" id="clearSelection">Clear selection</button>
+
+          <button
+            class="ghost small"
+            id="selectVisible"
+          >
+            Select visible
+          </button>
+
+          <button
+            class="ghost small"
+            id="clearSelection"
+          >
+            Clear selection
+          </button>
+
         </div>
+
       </div>
+
+
+      <!-- RANGE -->
 
       <div class="range-grid">
-        <label>Group name prefix
-          <input id="prefix" type="text" placeholder="School Group">
+
+        <label>
+          Group name prefix
+
+          <input
+            id="prefix"
+            type="text"
+            placeholder="School Group"
+          >
+
         </label>
-        <label>From
-          <input id="from" type="number" min="0" step="1" placeholder="10">
+
+
+        <label>
+          From
+
+          <input
+            id="from"
+            type="number"
+            min="0"
+            step="1"
+            placeholder="10"
+          >
+
         </label>
-        <label>To
-          <input id="to" type="number" min="0" step="1" placeholder="40">
+
+
+        <label>
+          To
+
+          <input
+            id="to"
+            type="number"
+            min="0"
+            step="1"
+            placeholder="40"
+          >
+
         </label>
-        <button id="selectRange">Select range</button>
+
+
+        <button id="selectRange">
+          Select range
+        </button>
+
       </div>
 
-      <div id="rangeInfo" class="range-info hidden"></div>
+
+      <div
+        id="rangeInfo"
+        class="range-info hidden"
+      ></div>
+
+
+      <!-- COUNTS -->
 
       <div class="selection-meta">
-        <span><strong id="selectedCount">0</strong> selected</span>
-        <span><strong id="visibleCount">0</strong> visible · <strong id="totalCount">0</strong> total</span>
+
+        <span>
+          <strong id="selectedCount">0</strong>
+          selected
+        </span>
+
+        <span>
+          <strong id="visibleCount">0</strong>
+          visible ·
+          <strong id="totalCount">0</strong>
+          total
+        </span>
+
       </div>
 
-      <div class="list" id="groupList"></div>
+
+      <!-- GROUP LIST -->
+
+      <div
+        class="list"
+        id="groupList"
+      ></div>
+
     </section>
+
+
+    <!-- ===================================================
+         2. GROUP PERMISSIONS
+         =================================================== -->
 
     <section>
+
       <div class="section-header">
+
         <div>
-          <h2 class="section-title">2. Group permissions</h2>
-          <p class="section-description">Changes are staged first. Nothing is sent to WhatsApp until you press Apply Changes.</p>
+
+          <h2 class="section-title">
+            2. Group permissions
+          </h2>
+
+          <p class="section-description">
+            Changes are staged first. Nothing is sent to WhatsApp
+            until you press Apply Changes.
+          </p>
+
         </div>
+
       </div>
 
-      <div class="notice" id="selectionNotice"><strong>No groups selected.</strong> Select one or more groups above to view their current permission state.</div>
+
+      <!-- SELECTION NOTICE -->
+
+      <div
+        class="notice"
+        id="selectionNotice"
+      >
+        <strong>No groups selected.</strong>
+        Select one or more groups above to view their current permission state.
+      </div>
+
+
+      <!-- PERMISSIONS -->
 
       <div class="permission-grid">
-        <div class="permission-heading">Members can</div>
-        <div class="permission-row">
-          <div class="permission-icon">✎</div>
-          <div><div class="permission-name">Edit group settings</div><div class="permission-desc">Name, icon, description and other group settings.</div></div>
-          <div><div class="permission-state" id="state-editGroupSettings">—</div><button class="switch" id="perm-editGroupSettings" aria-label="Edit group settings" data-key="editGroupSettings"></button></div>
-        </div>
-        <div class="permission-row">
-          <div class="permission-icon">▤</div>
-          <div><div class="permission-name">Send new messages</div><div class="permission-desc">Allow members to send messages in the group.</div></div>
-          <div><div class="permission-state" id="state-sendNewMessages">—</div><button class="switch" id="perm-sendNewMessages" aria-label="Send new messages" data-key="sendNewMessages"></button></div>
-        </div>
-        <div class="permission-row">
-          <div class="permission-icon">＋</div>
-          <div><div class="permission-name">Add other members</div><div class="permission-desc">Allow members to add participants to the group.</div></div>
-          <div><div class="permission-state" id="state-addOtherMembers">—</div><button class="switch" id="perm-addOtherMembers" aria-label="Add other members" data-key="addOtherMembers"></button></div>
-        </div>
-        <div class="permission-row">
-          <div class="permission-icon">↶</div>
-          <div><div class="permission-name">Send message history</div><div class="permission-desc">Share recent message history with new members.</div></div>
-          <div><div class="permission-state" id="state-sendMessageHistory">Unavailable</div><button class="switch unsupported" id="perm-sendMessageHistory" disabled aria-label="Send message history is unavailable"></button></div>
+
+        <div class="permission-heading">
+          Members can
         </div>
 
-        <div class="permission-heading" style="margin-top:8px">Admins can</div>
+
+        <!-- EDIT GROUP SETTINGS -->
+
         <div class="permission-row">
-          <div class="permission-icon">✓</div>
-          <div><div class="permission-name">Approve new members</div><div class="permission-desc">Require admin approval before someone joins through a join request.</div></div>
-          <div><div class="permission-state" id="state-approveNewMembers">—</div><button class="switch" id="perm-approveNewMembers" aria-label="Approve new members" data-key="approveNewMembers"></button></div>
+
+          <div class="permission-icon">
+            ✎
+          </div>
+
+          <div>
+
+            <div class="permission-name">
+              Edit group settings
+            </div>
+
+            <div class="permission-desc">
+              Name, icon, description and other group settings.
+            </div>
+
+          </div>
+
+          <div>
+
+            <div
+              class="permission-state"
+              id="state-editGroupSettings"
+            >
+              —
+            </div>
+
+            <button
+              class="switch"
+              id="perm-editGroupSettings"
+              aria-label="Edit group settings"
+              data-key="editGroupSettings"
+            ></button>
+
+          </div>
+
         </div>
+
+
+        <!-- SEND NEW MESSAGES -->
+
+        <div class="permission-row">
+
+          <div class="permission-icon">
+            ▤
+          </div>
+
+          <div>
+
+            <div class="permission-name">
+              Send new messages
+            </div>
+
+            <div class="permission-desc">
+              Allow members to send messages in the group.
+            </div>
+
+          </div>
+
+          <div>
+
+            <div
+              class="permission-state"
+              id="state-sendNewMessages"
+            >
+              —
+            </div>
+
+            <button
+              class="switch"
+              id="perm-sendNewMessages"
+              aria-label="Send new messages"
+              data-key="sendNewMessages"
+            ></button>
+
+          </div>
+
+        </div>
+
+
+        <!-- ADD OTHER MEMBERS -->
+
+        <div class="permission-row">
+
+          <div class="permission-icon">
+            ＋
+          </div>
+
+          <div>
+
+            <div class="permission-name">
+              Add other members
+            </div>
+
+            <div class="permission-desc">
+              Allow members to add participants to the group.
+            </div>
+
+          </div>
+
+          <div>
+
+            <div
+              class="permission-state"
+              id="state-addOtherMembers"
+            >
+              —
+            </div>
+
+            <button
+              class="switch"
+              id="perm-addOtherMembers"
+              aria-label="Add other members"
+              data-key="addOtherMembers"
+            ></button>
+
+          </div>
+
+        </div>
+
+
+        <!-- SEND MESSAGE HISTORY -->
+
+        <div class="permission-row">
+
+          <div class="permission-icon">
+            ↶
+          </div>
+
+          <div>
+
+            <div class="permission-name">
+              Send message history
+            </div>
+
+            <div class="permission-desc">
+              Share recent message history with new members.
+            </div>
+
+          </div>
+
+          <div>
+
+            <div
+              class="permission-state"
+              id="state-sendMessageHistory"
+            >
+              Unavailable
+            </div>
+
+            <button
+              class="switch unsupported"
+              id="perm-sendMessageHistory"
+              disabled
+              aria-label="Send message history is unavailable"
+            ></button>
+
+          </div>
+
+        </div>
+
+
+        <!-- ADMINS -->
+
+        <div
+          class="permission-heading"
+          style="margin-top:8px"
+        >
+          Admins can
+        </div>
+
+
+        <!-- APPROVE NEW MEMBERS -->
+
+        <div class="permission-row">
+
+          <div class="permission-icon">
+            ✓
+          </div>
+
+          <div>
+
+            <div class="permission-name">
+              Approve new members
+            </div>
+
+            <div class="permission-desc">
+              Require admin approval before someone joins through a join request.
+            </div>
+
+          </div>
+
+          <div>
+
+            <div
+              class="permission-state"
+              id="state-approveNewMembers"
+            >
+              —
+            </div>
+
+            <button
+              class="switch"
+              id="perm-approveNewMembers"
+              aria-label="Approve new members"
+              data-key="approveNewMembers"
+            ></button>
+
+          </div>
+
+        </div>
+
       </div>
 
-      <div class="notice warning" id="historyNotice"><strong>Send message history:</strong> Baileys 6.7.24, which this project currently uses, does not expose a supported setter for this WhatsApp permission. It is shown here so the panel matches the WhatsApp permission list, but it is intentionally disabled rather than using an unsafe undocumented packet.</div>
 
-      <div class="pending" id="pendingBox">
-        <div class="pending-title">Pending changes</div>
-        <div class="pending-list" id="pendingList"></div>
+      <!-- HISTORY NOTICE -->
+
+      <div
+        class="notice warning"
+        id="historyNotice"
+      >
+        <strong>Send message history:</strong>
+        Baileys 6.7.24, which this project currently uses,
+        does not expose a supported setter for this WhatsApp permission.
+        It is shown here so the panel matches the WhatsApp permission list,
+        but it is intentionally disabled rather than using an unsafe
+        undocumented packet.
       </div>
 
-      <div class="apply-bar"><button id="applyChanges" disabled>Apply Changes</button></div>
 
-      <div class="progress-wrap" id="progressWrap">
-        <div class="progress-text"><span id="progressText">Preparing…</span><span id="progressPercent">0%</span></div>
-        <div class="progress-line"><div class="progress-fill" id="progressFill"></div></div>
+      <!-- PENDING -->
+
+      <div
+        class="pending"
+        id="pendingBox"
+      >
+
+        <div class="pending-title">
+          Pending changes
+        </div>
+
+        <div
+          class="pending-list"
+          id="pendingList"
+        ></div>
+
       </div>
 
-      <div class="result" id="resultBox">
-        <div class="section-header"><div><h3 class="section-title">Update result</h3><p class="section-description" id="resultDescription"></p></div><div class="section-actions"><button class="ghost small" id="retryFailed">Retry failed</button></div></div>
-        <div class="result-summary" id="resultSummary"></div>
-        <div class="result-list" id="resultList"></div>
+
+      <!-- APPLY -->
+
+      <div class="apply-bar">
+
+        <button
+          id="applyChanges"
+          disabled
+        >
+          Apply Changes
+        </button>
+
       </div>
+
+
+      <!-- PROGRESS -->
+
+      <div
+        class="progress-wrap"
+        id="progressWrap"
+      >
+
+        <div class="progress-text">
+
+          <span id="progressText">
+            Preparing…
+          </span>
+
+          <span id="progressPercent">
+            0%
+          </span>
+
+        </div>
+
+        <div class="progress-line">
+
+          <div
+            class="progress-fill"
+            id="progressFill"
+          ></div>
+
+        </div>
+
+      </div>
+
+
+      <!-- RESULT -->
+
+      <div
+        class="result"
+        id="resultBox"
+      >
+
+        <div class="section-header">
+
+          <div>
+
+            <h3 class="section-title">
+              Update result
+            </h3>
+
+            <p
+              class="section-description"
+              id="resultDescription"
+            ></p>
+
+          </div>
+
+          <div class="section-actions">
+
+            <button
+              class="ghost small"
+              id="retryFailed"
+            >
+              Retry failed
+            </button>
+
+          </div>
+
+        </div>
+
+
+        <div
+          class="result-summary"
+          id="resultSummary"
+        ></div>
+
+
+        <div
+          class="result-list"
+          id="resultList"
+        ></div>
+
+      </div>
+
     </section>
+
   </div>
+
 </main>
+
+
+<!-- =======================================================
+     EXISTING JAVASCRIPT — UNCHANGED
+     ======================================================= -->
+
 <script src="/permissions.js" defer></script>
+
 </body>
 </html>
