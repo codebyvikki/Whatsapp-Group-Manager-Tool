@@ -139,7 +139,7 @@
     flex: 0 0 50px;
     display: grid;
     place-items: center;
-    border-radius: 14px;
+    border-radius: 15px;
     background: var(--brand);
     color: #fff;
     font-size: 22px;
@@ -710,6 +710,12 @@
     background: var(--card);
     color: var(--ink);
     box-shadow: none;
+  }
+
+  .tabs button.on:hover:not(:disabled) {
+    background: var(--brand);
+    color: #fff;
+    box-shadow: 0 3px 8px rgba(18,140,85,.18);
   }
 
   .tabs button.on {

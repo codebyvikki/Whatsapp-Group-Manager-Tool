@@ -547,33 +547,43 @@
 
   .switch{
     position:relative;
-    width:58px;
-    height:34px;
+    width:52px;
+    height:30px;
+    min-height:30px;
+    flex:0 0 52px;
     display:inline-flex;
     align-items:center;
+    justify-content:flex-start;
     padding:0;
     border:0;
     border-radius:999px;
-    background:#9ba5a0;
+    background:#c4cbc7;
+    color:transparent;
     box-shadow:none;
+    cursor:pointer;
+    transition:
+      background .18s ease,
+      box-shadow .18s ease;
   }
 
   .switch:hover:not(:disabled){
-    background:#8e9993;
+    background:#b8c1bc;
     box-shadow:none;
   }
 
   .switch::after{
     content:"";
-    width:26px;
-    height:26px;
+    position:absolute;
+    width:24px;
+    height:24px;
+    left:3px;
+    top:3px;
     border-radius:50%;
     background:#fff;
-    position:absolute;
-    left:4px;
-    top:4px;
-    box-shadow:0 2px 6px rgba(0,0,0,.2);
-    transition:transform .15s;
+    box-shadow:0 1px 4px rgba(0,0,0,.18);
+    transition:
+      transform .18s ease,
+      box-shadow .18s ease;
   }
 
   .switch.on{
@@ -585,7 +595,7 @@
   }
 
   .switch.on::after{
-    transform:translateX(24px);
+    transform:translateX(22px);
   }
 
   .switch.mixed{
@@ -593,15 +603,15 @@
   }
 
   .switch.mixed::after{
-    transform:translateX(12px);
+    transform:translateX(11px);
   }
 
   .switch.mixed::before{
     content:"";
     position:absolute;
-    left:12px;
-    right:12px;
-    top:16px;
+    left:11px;
+    right:11px;
+    top:14px;
     height:2px;
     background:#fff;
     border-radius:2px;
@@ -610,8 +620,17 @@
 
   .switch.unsupported{
     background:#b6bfba;
+    cursor:not-allowed;
   }
 
+  .switch:disabled{
+    opacity:1;
+  }
+
+  .switch:focus-visible{
+    outline:3px solid rgba(18,140,85,.22);
+    outline-offset:3px;
+  }
 
   /* =========================================================
      PENDING / APPLY
@@ -1431,19 +1450,6 @@
       </div>
 
 
-      <!-- HISTORY NOTICE -->
-
-      <div
-        class="notice warning"
-        id="historyNotice"
-      >
-        <strong>Send message history:</strong>
-        Baileys 6.7.24, which this project currently uses,
-        does not expose a supported setter for this WhatsApp permission.
-        It is shown here so the panel matches the WhatsApp permission list,
-        but it is intentionally disabled rather than using an unsafe
-        undocumented packet.
-      </div>
 
 
       <!-- PENDING -->
