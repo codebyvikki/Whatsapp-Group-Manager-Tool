@@ -15,7 +15,7 @@ async function getSharp() {
   }
 }
 import fs from 'fs';
-import { MongoClient } from 'mongodb';
+import { MongoClient, Binary } from 'mongodb';
 import { createStats, registerStatsRoutes } from './stats.js';
 import makeWASocket, {
   useMultiFileAuthState,
@@ -41,8 +41,14 @@ const DP_START_GAP_MS = Math.max(700, Number(process.env.DP_START_GAP_MS || 1200
 const DP_IMAGE_MAX_BYTES = Math.max(256 * 1024, Number(process.env.DP_IMAGE_MAX_BYTES || 8 * 1024 * 1024));
 const DP_IMAGE_TTL_MS = 15 * 60 * 1000;
 const DP_JOB_TTL_MS = 30 * 60 * 1000;
+const DESCRIPTION_MAX_GROUPS = Math.max(1, Number(process.env.MAX_DESCRIPTION_GROUPS || 500));
+const DESCRIPTION_START_GAP_MS = Math.max(700, Number(process.env.DESCRIPTION_START_GAP_MS || 1000));
+const DESCRIPTION_MAX_ATTEMPTS = Math.max(2, Number(process.env.DESCRIPTION_MAX_ATTEMPTS || 4));
+const DESCRIPTION_JOB_TTL_MS = 30 * 60 * 1000;
 const dpImages = new Map();
 const dpJobs = new Map();
+const descriptionJobs = new Map();
+const activeBulkJobs = new Set();
 let permissionNextAllowedAt = 0;
 let permissionCooldownUntil = 0;
 let permissionAdaptiveGapMs = PERMISSION_START_GAP_MS;
@@ -171,7 +177,9 @@ async function getDb() {
       await Promise.all([
         db.collection('users').createIndex({ usernameKey: 1 }, { unique: true }),
         db.collection('lists').createIndex({ userId: 1, name: 1 }, { unique: true }),
-        db.collection('sessions').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 })
+        db.collection('sessions').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+        db.collection('bulkJobs').createIndex({ userId: 1, type: 1, state: 1, updatedAt: -1 }),
+        db.collection('bulkJobs').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 })
       ]);
       return db;
     } catch (e) {
@@ -863,6 +871,7 @@ async function startWA(userId) {
         getGroups(wa, true)
           .then(() => wa.stats.onOpen())
           .catch((e) => console.log(`[wa:${wa.userId}] group preload:`, e.message));
+        setTimeout(() => resumeBulkJobsForUser(wa.userId).catch((e) => console.error(`[bulk:${wa.userId}] resume failed:`, e.message)), 250);
       }
 
       if (connection === 'close') {
@@ -1324,13 +1333,123 @@ app.get('/api/groups', requireAuth, needWA, async (req, res) => {
   }
 });
 
+/* ---------- Resilient bulk job storage ---------- */
+
+function bulkJobSerializable(job) {
+  const out = { ...job };
+  if (out.imageBuffer && Buffer.isBuffer(out.imageBuffer)) out.imageBuffer = new Binary(out.imageBuffer);
+  return out;
+}
+
+function hydrateBulkJob(doc) {
+  if (!doc) return null;
+  const job = { ...doc };
+  delete job._id;
+  delete job.type;
+  if (job.imageBuffer instanceof Binary) job.imageBuffer = Buffer.from(job.imageBuffer.buffer);
+  return job;
+}
+
+async function persistBulkJob(job, type = job.type || 'dp') {
+  job.type = type;
+  job.updatedAt = Date.now();
+  const d = await getDb();
+  if (d) {
+    await d.collection('bulkJobs').replaceOne(
+      { _id: String(job.id) },
+      { _id: String(job.id), ...bulkJobSerializable(job), type, userId: String(job.userId), expiresAt: new Date(job.expiresAt) },
+      { upsert: true }
+    );
+  }
+}
+
+async function deleteBulkJob(job, type = job.type || 'dp') {
+  const d = await getDb();
+  if (d) await d.collection('bulkJobs').deleteOne({ _id: String(job.id), type });
+}
+
+async function loadBulkJob(id, userId, type = 'dp') {
+  const key = String(id || '');
+  const map = type === 'dp' ? dpJobs : descriptionJobs;
+  const cached = map.get(key);
+  if (cached && String(cached.userId) === String(userId)) return cached;
+  const d = await getDb();
+  if (!d) return null;
+  const doc = await d.collection('bulkJobs').findOne({ _id: key, type, userId: String(userId) });
+  if (!doc) return null;
+  const job = hydrateBulkJob(doc);
+  map.set(job.id, job);
+  return job;
+}
+
+async function findActiveBulkJob(userId, type = 'dp') {
+  const uid = String(userId);
+  const map = type === 'dp' ? dpJobs : descriptionJobs;
+  const activeStates = new Set(['queued', 'running', 'paused', 'recoverable']);
+  let best = null;
+  for (const job of map.values()) {
+    if (String(job.userId) !== uid || !activeStates.has(job.state)) continue;
+    if (!best || (job.updatedAt || 0) > (best.updatedAt || 0)) best = job;
+  }
+  const d = await getDb();
+  if (d) {
+    const doc = await d.collection('bulkJobs').findOne(
+      { userId: uid, type, state: { $in: [...activeStates] }, expiresAt: { $gt: new Date() } },
+      { sort: { updatedAt: -1 } }
+    );
+    const dbJob = hydrateBulkJob(doc);
+    if (dbJob && (!best || (dbJob.updatedAt || 0) > (best.updatedAt || 0))) {
+      map.set(dbJob.id, dbJob);
+      best = dbJob;
+    }
+  }
+  return best;
+}
+
+
+async function findLatestBulkJob(userId, type = 'dp') {
+  const uid = String(userId);
+  const map = type === 'dp' ? dpJobs : descriptionJobs;
+  let best = null;
+  for (const job of map.values()) {
+    if (String(job.userId) !== uid) continue;
+    if (job.expiresAt && job.expiresAt <= Date.now()) continue;
+    if (!best || (job.updatedAt || 0) > (best.updatedAt || 0)) best = job;
+  }
+  const d = await getDb();
+  if (d) {
+    const doc = await d.collection('bulkJobs').findOne(
+      { userId: uid, type, expiresAt: { $gt: new Date() } },
+      { sort: { updatedAt: -1 } }
+    );
+    const dbJob = hydrateBulkJob(doc);
+    if (dbJob && (!best || (dbJob.updatedAt || 0) > (best.updatedAt || 0))) {
+      map.set(dbJob.id, dbJob);
+      best = dbJob;
+    }
+  }
+  return best;
+}
+
+function markJobPaused(job, message) {
+  if (job.state === 'running') {
+    const current = job.results?.find((x) => x.status === 'running');
+    if (current) current.status = 'pending';
+  }
+  job.state = 'paused';
+  job.error = String(message || 'Waiting for WhatsApp connection.').slice(0, 300);
+  job.current = null;
+  job.expiresAt = Date.now() + 24 * 60 * 60 * 1000;
+}
+
+function activeJobKey(userId, type) {
+  return `${type}:${String(userId)}`;
+}
+
 /* ---------- Group DP Manager ---------- */
 
 function dpErrorText(e) {
-  return String(e?.message || e || 'Unknown error')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 300);
+  return String(e?.message || e || 'Unknown error').replace(/\s+/g, ' ').trim().slice(0, 300);
 }
 
 function dpJobPublic(job) {
@@ -1346,25 +1465,18 @@ function dpJobPublic(job) {
     current: job.current,
     startedAt: job.startedAt,
     finishedAt: job.finishedAt,
-    results: job.results.map((x) => ({
-      id: x.id,
-      name: x.name,
-      status: x.status,
-      error: x.error || null
-    }))
+    updatedAt: job.updatedAt || null,
+    error: job.error || null,
+    results: (job.results || []).map((x) => ({ id: x.id, name: x.name, status: x.status, error: x.error || null }))
   };
 }
 
 function cleanupDpStore() {
   const now = Date.now();
-  for (const [token, image] of dpImages) {
-    if (image.expiresAt <= now) dpImages.delete(token);
-  }
-  for (const [id, job] of dpJobs) {
-    if (job.expiresAt <= now && job.state !== 'running') dpJobs.delete(id);
-  }
+  for (const [token, image] of dpImages) if (image.expiresAt <= now) dpImages.delete(token);
+  for (const [id, job] of dpJobs) if (job.expiresAt <= now && !['running', 'queued', 'paused'].includes(job.state)) dpJobs.delete(id);
+  for (const [id, job] of descriptionJobs) if (job.expiresAt <= now && !['running', 'queued', 'paused'].includes(job.state)) descriptionJobs.delete(id);
 }
-
 setInterval(cleanupDpStore, 5 * 60 * 1000).unref?.();
 
 function dpValidateIds(ids) {
@@ -1376,113 +1488,102 @@ function dpValidateIds(ids) {
   return clean;
 }
 
-function dpGetJobForUser(req, id) {
-  const job = dpJobs.get(String(id || ''));
-  if (!job || job.userId !== String(req.user.userId)) return null;
-  return job;
-}
-
 async function normalizeDpImage(buffer) {
   if (!Buffer.isBuffer(buffer) || !buffer.length) throw new Error('Please upload an image.');
   if (buffer.length > DP_IMAGE_MAX_BYTES) throw new Error(`Image is too large. Maximum size is ${Math.round(DP_IMAGE_MAX_BYTES / 1024 / 1024)} MB.`);
-
   const sharp = await getSharp();
   const meta = await sharp(buffer, { failOn: 'error' }).metadata();
   if (!meta.width || !meta.height) throw new Error('The uploaded file is not a valid image.');
   if (!['jpeg', 'png', 'webp'].includes(meta.format)) throw new Error('Please use JPG, PNG or WEBP image format.');
+  return sharp(buffer, { failOn: 'error' }).rotate().resize(640, 640, { fit: 'cover', position: 'centre' }).jpeg({ quality: 90, mozjpeg: true }).toBuffer();
+}
 
-  return sharp(buffer, { failOn: 'error' })
-    .rotate()
-    .resize(640, 640, { fit: 'cover', position: 'centre' })
-    .jpeg({ quality: 90, mozjpeg: true })
-    .toBuffer();
+async function updateGroupDp(wa, jid, imageBuffer) {
+  if (!Buffer.isBuffer(imageBuffer) || !imageBuffer.length) throw new Error('No image data is available.');
+  await wa.sock.updateProfilePicture(jid, imageBuffer);
 }
 
 async function runDpJob(job) {
+  const key = activeJobKey(job.userId, 'dp');
+  if (activeBulkJobs.has(key)) return;
+  activeBulkJobs.add(key);
   const wa = getWA(job.userId);
-  job.state = 'running';
-  job.startedAt = new Date().toISOString();
-
   try {
-    for (let i = 0; i < job.results.length; i++) {
-      if (wa.state !== 'connected' || !wa.sock) throw new Error('WhatsApp was disconnected during the operation.');
+    job.state = 'running';
+    job.error = null;
+    job.startedAt ||= new Date().toISOString();
+    job.expiresAt = Date.now() + 24 * 60 * 60 * 1000;
+    await persistBulkJob(job, 'dp');
 
+    for (let i = 0; i < job.results.length; i++) {
+      if (wa.state !== 'connected' || !wa.sock) {
+        markJobPaused(job, 'WhatsApp disconnected. The job will resume automatically after reconnection.');
+        await persistBulkJob(job, 'dp');
+        return;
+      }
       const result = job.results[i];
+      if (result.status === 'success') continue;
       job.current = { index: i + 1, total: job.total, name: result.name };
       result.status = 'running';
-
+      await persistBulkJob(job, 'dp');
       try {
         await withWALinkLimit(wa, async () => {
-          if (job.action === 'update') {
-            await updateGroupDp(wa, result.id, job.imageBuffer);
-          } else {
-            await wa.sock.removeProfilePicture(result.id);
-          }
+          if (job.action === 'update') await updateGroupDp(wa, result.id, job.imageBuffer);
+          else await wa.sock.removeProfilePicture(result.id);
         });
-
         result.status = 'success';
+        result.error = null;
         job.success++;
       } catch (e) {
         result.status = 'failed';
         result.error = dpErrorText(e);
         job.failed++;
       }
-
-      job.done = i + 1;
+      job.done = job.results.filter((x) => x.status === 'success' || x.status === 'failed').length;
+      job.current = null;
+      await persistBulkJob(job, 'dp');
       if (i < job.results.length - 1) await sleep(DP_START_GAP_MS);
     }
-
     job.state = 'finished';
+    job.finishedAt = new Date().toISOString();
+    job.expiresAt = Date.now() + DP_JOB_TTL_MS;
+    await persistBulkJob(job, 'dp');
+    setTimeout(() => { const current = dpJobs.get(job.id); if (current === job) { delete current.imageBuffer; current.expiresAt = Date.now() + 5 * 60 * 1000; persistBulkJob(current, 'dp').catch(() => {}); } }, Math.max(1000, DP_JOB_TTL_MS - 5 * 60 * 1000)).unref?.();
   } catch (e) {
     job.state = 'error';
     job.error = dpErrorText(e);
-  } finally {
-    job.current = null;
     job.finishedAt = new Date().toISOString();
     job.expiresAt = Date.now() + DP_JOB_TTL_MS;
-    // Image bytes stay in the job briefly so failed groups can be retried.
-    setTimeout(() => {
-      const current = dpJobs.get(job.id);
-      if (current === job) {
-        delete current.imageBuffer;
-        current.expiresAt = Date.now() + 5 * 60 * 1000;
-      }
-    }, DP_JOB_TTL_MS - 5 * 60 * 1000).unref?.();
+    await persistBulkJob(job, 'dp').catch(() => {});
+  } finally {
+    activeBulkJobs.delete(key);
   }
-}
-
-// The installed Baileys release accepts a Buffer directly for profile-picture
-// updates. This small wrapper keeps the call in one place and makes failures
-// easier to diagnose.
-async function updateGroupDp(wa, jid, imageBuffer) {
-  if (!Buffer.isBuffer(imageBuffer) || !imageBuffer.length) throw new Error('No image data is available.');
-  await wa.sock.updateProfilePicture(jid, imageBuffer);
 }
 
 app.post('/api/group-dp/image', requireAuth, (req, res) => {
   try {
     const type = String(req.headers['content-type'] || '').split(';')[0].toLowerCase();
-    if (!['image/jpeg', 'image/png', 'image/webp'].includes(type)) {
-      return res.status(415).json({ error: 'Please upload a JPG, PNG or WEBP image.' });
-    }
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(type)) return res.status(415).json({ error: 'Please upload a JPG, PNG or WEBP image.' });
     const buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body || '');
     if (!buffer.length) return res.status(400).json({ error: 'Please upload an image.' });
-    if (buffer.length > DP_IMAGE_MAX_BYTES) {
-      return res.status(413).json({ error: `Image is too large. Maximum size is ${Math.round(DP_IMAGE_MAX_BYTES / 1024 / 1024)} MB.` });
-    }
-
+    if (buffer.length > DP_IMAGE_MAX_BYTES) return res.status(413).json({ error: `Image is too large. Maximum size is ${Math.round(DP_IMAGE_MAX_BYTES / 1024 / 1024)} MB.` });
     const token = crypto.randomUUID();
-    dpImages.set(token, {
-      userId: String(req.user.userId),
-      buffer,
-      type,
-      expiresAt: Date.now() + DP_IMAGE_TTL_MS
-    });
+    dpImages.set(token, { userId: String(req.user.userId), buffer, type, expiresAt: Date.now() + DP_IMAGE_TTL_MS });
     res.json({ ok: true, token });
-  } catch (e) {
-    res.status(400).json({ error: dpErrorText(e) });
-  }
+  } catch (e) { res.status(400).json({ error: dpErrorText(e) }); }
 });
+
+async function createDpJob(req, action, ids, imageBuffer = null) {
+  const active = await findActiveBulkJob(req.user.userId, 'dp');
+  if (active) throw new Error(`A DP job is already ${active.state}. Wait for it to finish or reconnect to it.`);
+  const all = await getGroups(getWA(req.user.userId), false);
+  const results = ids.map((id) => ({ id, name: String(all[id]?.subject || id), status: 'pending', error: null }));
+  const job = { id: `DP-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(2).toString('hex')}`, type: 'dp', userId: String(req.user.userId), action, imageBuffer, results, total: results.length, done: 0, success: 0, failed: 0, current: null, state: 'queued', startedAt: null, finishedAt: null, updatedAt: Date.now(), error: null, createdAt: Date.now(), expiresAt: Date.now() + 24 * 60 * 60 * 1000 };
+  dpJobs.set(job.id, job);
+  await persistBulkJob(job, 'dp');
+  runDpJob(job).catch((e) => console.error(`[dp:${job.id}]`, e.message));
+  return job;
+}
 
 app.post('/api/group-dp/apply', requireAuth, needWA, async (req, res) => {
   try {
@@ -1491,131 +1592,175 @@ app.post('/api/group-dp/apply', requireAuth, needWA, async (req, res) => {
     const token = String(req.body?.imageToken || '');
     const image = dpImages.get(token);
     if (!image || image.userId !== String(req.user.userId)) return res.status(400).json({ error: 'The uploaded image has expired. Please upload it again.' });
-
     const normalized = await normalizeDpImage(image.buffer);
     dpImages.delete(token);
-
-    const all = await getGroups(getWA(req.user.userId), false);
-    const results = ids.map((id) => ({
-      id,
-      name: String(all[id]?.subject || id),
-      status: 'pending',
-      error: null
-    }));
-
-    const job = {
-      id: `DP-${Date.now().toString(36).toUpperCase()}`,
-      userId: String(req.user.userId),
-      action: 'update',
-      imageBuffer: normalized,
-      results,
-      total: results.length,
-      done: 0,
-      success: 0,
-      failed: 0,
-      current: null,
-      state: 'queued',
-      startedAt: null,
-      finishedAt: null,
-      error: null,
-      expiresAt: Date.now() + DP_JOB_TTL_MS
-    };
-
-    dpJobs.set(job.id, job);
-    runDpJob(job).catch((e) => {
-      job.state = 'error';
-      job.error = dpErrorText(e);
-      job.finishedAt = new Date().toISOString();
-      job.expiresAt = Date.now() + DP_JOB_TTL_MS;
-    });
+    const job = await createDpJob(req, 'update', ids, normalized);
     res.json({ ok: true, job: dpJobPublic(job) });
-  } catch (e) {
-    res.status(400).json({ error: dpErrorText(e) });
-  }
+  } catch (e) { res.status(400).json({ error: dpErrorText(e) }); }
 });
 
 app.post('/api/group-dp/remove', requireAuth, needWA, async (req, res) => {
   try {
     const ids = dpValidateIds(req.body?.ids);
-    const all = await getGroups(getWA(req.user.userId), false);
-    const results = ids.map((id) => ({
-      id,
-      name: String(all[id]?.subject || id),
-      status: 'pending',
-      error: null
-    }));
-
-    const job = {
-      id: `DP-${Date.now().toString(36).toUpperCase()}`,
-      userId: String(req.user.userId),
-      action: 'remove',
-      imageBuffer: null,
-      results,
-      total: results.length,
-      done: 0,
-      success: 0,
-      failed: 0,
-      current: null,
-      state: 'queued',
-      startedAt: null,
-      finishedAt: null,
-      error: null,
-      expiresAt: Date.now() + DP_JOB_TTL_MS
-    };
-
-    dpJobs.set(job.id, job);
-    runDpJob(job).catch((e) => {
-      job.state = 'error';
-      job.error = dpErrorText(e);
-      job.finishedAt = new Date().toISOString();
-      job.expiresAt = Date.now() + DP_JOB_TTL_MS;
-    });
+    const job = await createDpJob(req, 'remove', ids, null);
     res.json({ ok: true, job: dpJobPublic(job) });
-  } catch (e) {
-    res.status(400).json({ error: dpErrorText(e) });
-  }
+  } catch (e) { res.status(400).json({ error: dpErrorText(e) }); }
 });
 
-app.get('/api/group-dp/job/:id', requireAuth, (req, res) => {
-  const job = dpGetJobForUser(req, req.params.id);
-  if (!job) return res.status(404).json({ error: 'DP job not found or expired.' });
+app.get('/api/group-dp/job/:id', requireAuth, async (req, res) => {
+  const job = await loadBulkJob(req.params.id, req.user.userId, 'dp');
+  if (!job || (job.expiresAt && job.expiresAt <= Date.now() && !['running','queued','paused'].includes(job.state))) return res.status(404).json({ error: 'DP job not found or expired.' });
+  if (job.state === 'paused') {
+    const wa = getWA(req.user.userId);
+    if (wa.state === 'connected' && wa.sock) runDpJob(job).catch(() => {});
+  }
   res.json({ job: dpJobPublic(job), error: job.error || null });
 });
 
-app.post('/api/group-dp/job/:id/retry', requireAuth, needWA, async (req, res) => {
-  const old = dpGetJobForUser(req, req.params.id);
-  if (!old) return res.status(404).json({ error: 'DP job not found or expired.' });
-  if (old.state === 'running' || old.state === 'queued') return res.status(409).json({ error: 'The current DP job is still running.' });
+app.get('/api/group-dp/active', requireAuth, async (req, res) => {
+  const active = await findActiveBulkJob(req.user.userId, 'dp');
+  const job = active || await findLatestBulkJob(req.user.userId, 'dp');
+  if (active && getWA(req.user.userId).state === 'connected') runDpJob(active).catch(() => {});
+  res.json({ job: dpJobPublic(job) });
+});
 
+app.post('/api/group-dp/job/:id/retry', requireAuth, needWA, async (req, res) => {
+  const old = await loadBulkJob(req.params.id, req.user.userId, 'dp');
+  if (!old) return res.status(404).json({ error: 'DP job not found or expired.' });
+  if (old.state === 'running' || old.state === 'queued' || old.state === 'paused') return res.status(409).json({ error: 'The current DP job is still active.' });
   const failed = old.results.filter((x) => x.status === 'failed');
   if (!failed.length) return res.status(400).json({ error: 'There are no failed groups to retry.' });
   if (old.action === 'update' && !old.imageBuffer) return res.status(410).json({ error: 'The uploaded image has expired. Please start a new update.' });
-
-  const retry = {
-    id: `DP-${Date.now().toString(36).toUpperCase()}`,
-    userId: old.userId,
-    action: old.action,
-    imageBuffer: old.imageBuffer || null,
-    results: failed.map((x) => ({ ...x, status: 'pending', error: null })),
-    total: failed.length,
-    done: 0,
-    success: 0,
-    failed: 0,
-    current: null,
-    state: 'queued',
-    startedAt: null,
-    finishedAt: null,
-    error: null,
-    expiresAt: Date.now() + DP_JOB_TTL_MS
-  };
+  const active = await findActiveBulkJob(req.user.userId, 'dp');
+  if (active) return res.status(409).json({ error: 'Another DP job is already active.' });
+  const retry = { id: `DP-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(2).toString('hex')}`, type:'dp', userId: old.userId, action: old.action, imageBuffer: old.imageBuffer || null, results: failed.map((x) => ({ ...x, status: 'pending', error: null })), total: failed.length, done: 0, success: 0, failed: 0, current: null, state: 'queued', startedAt: null, finishedAt: null, updatedAt: Date.now(), error: null, createdAt: Date.now(), expiresAt: Date.now() + 24 * 60 * 60 * 1000 };
   dpJobs.set(retry.id, retry);
-  runDpJob(retry).catch((e) => {
-    retry.state = 'error';
-    retry.error = dpErrorText(e);
-    retry.finishedAt = new Date().toISOString();
-  });
+  await persistBulkJob(retry, 'dp');
+  runDpJob(retry).catch(() => {});
   res.json({ ok: true, job: dpJobPublic(retry) });
 });
+
+/* ---------- Group Description Manager ---------- */
+
+function descriptionErrorText(e) { return String(e?.message || e || 'Unknown error').replace(/\s+/g, ' ').trim().slice(0, 300); }
+function descriptionValidateIds(ids) {
+  if (!Array.isArray(ids)) throw new Error('Please select at least one group.');
+  const clean = [...new Set(ids.map((id) => String(id || '').trim()).filter(Boolean))];
+  if (!clean.length) throw new Error('Please select at least one group.');
+  if (clean.length > DESCRIPTION_MAX_GROUPS) throw new Error(`Please process no more than ${DESCRIPTION_MAX_GROUPS} groups at once.`);
+  if (clean.some((id) => !id.endsWith('@g.us'))) throw new Error('One or more selected groups are invalid.');
+  return clean;
+}
+
+function descriptionJobPublic(job) {
+  if (!job) return null;
+  return { id: job.id, action: job.action, state: job.state, total: job.total, done: job.done, success: job.success, failed: job.failed, current: job.current, startedAt: job.startedAt, finishedAt: job.finishedAt, updatedAt: job.updatedAt || null, error: job.error || null, results: (job.results || []).map((x) => ({ id:x.id, name:x.name, status:x.status, error:x.error || null })) };
+}
+
+function isDescriptionRateError(e) { return /rate|overlimit|429|too many|throttl|temporar/i.test(descriptionErrorText(e)); }
+function isDescriptionPermanentError(e) { return /not-authorized|forbidden|403|not admin|not an admin|invalid|not a participant/i.test(descriptionErrorText(e)); }
+
+async function updateGroupDescriptionWithRetry(wa, jid, description) {
+  let last = null;
+  for (let attempt = 1; attempt <= DESCRIPTION_MAX_ATTEMPTS; attempt++) {
+    try {
+      if (!wa.sock || wa.state !== 'connected') throw new Error('WhatsApp is not connected');
+      await withWALinkLimit(wa, () => wa.sock.groupUpdateDescription(jid, description));
+      const g = wa.groupCache.data?.[jid];
+      if (g) g.desc = description;
+      return;
+    } catch (e) {
+      last = e;
+      if (isDescriptionPermanentError(e) || !isDescriptionRateError(e) || attempt >= DESCRIPTION_MAX_ATTEMPTS) break;
+      await sleep(Math.min(8000, DESCRIPTION_START_GAP_MS * attempt * 2));
+    }
+  }
+  throw last || new Error('Description update failed');
+}
+
+async function runDescriptionJob(job) {
+  const key = activeJobKey(job.userId, 'description');
+  if (activeBulkJobs.has(key)) return;
+  activeBulkJobs.add(key);
+  const wa = getWA(job.userId);
+  try {
+    job.state = 'running'; job.error = null; job.startedAt ||= new Date().toISOString(); job.expiresAt = Date.now() + 24*60*60*1000;
+    await persistBulkJob(job, 'description');
+    for (let i = 0; i < job.results.length; i++) {
+      if (wa.state !== 'connected' || !wa.sock) { markJobPaused(job, 'WhatsApp disconnected. The job will resume automatically after reconnection.'); await persistBulkJob(job, 'description'); return; }
+      const result = job.results[i];
+      if (result.status === 'success') continue;
+      job.current = { index:i+1, total:job.total, name:result.name }; result.status='running'; await persistBulkJob(job,'description');
+      try {
+        await updateGroupDescriptionWithRetry(wa, result.id, job.description);
+        result.status='success'; result.error=null; job.success++;
+      } catch (e) {
+        result.status='failed'; result.error=descriptionErrorText(e); job.failed++;
+      }
+      job.done = job.results.filter((x)=>x.status==='success'||x.status==='failed').length;
+      job.current=null; await persistBulkJob(job,'description');
+      if (i < job.results.length-1) await sleep(DESCRIPTION_START_GAP_MS);
+    }
+    job.state='finished'; job.finishedAt=new Date().toISOString(); job.expiresAt=Date.now()+DESCRIPTION_JOB_TTL_MS; await persistBulkJob(job,'description');
+  } catch(e) {
+    job.state='error'; job.error=descriptionErrorText(e); job.finishedAt=new Date().toISOString(); job.expiresAt=Date.now()+DESCRIPTION_JOB_TTL_MS; await persistBulkJob(job,'description').catch(()=>{});
+  } finally { activeBulkJobs.delete(key); }
+}
+
+async function createDescriptionJob(req, action, ids, description) {
+  const active = await findActiveBulkJob(req.user.userId, 'description');
+  if (active) throw new Error(`A description job is already ${active.state}. Wait for it to finish or reconnect to it.`);
+  const all = await getGroups(getWA(req.user.userId), false);
+  const results = ids.map((id)=>({id,name:String(all[id]?.subject||id),status:'pending',error:null}));
+  const job={id:`DESC-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(2).toString('hex')}`,type:'description',userId:String(req.user.userId),action,description,total:results.length,results,done:0,success:0,failed:0,current:null,state:'queued',startedAt:null,finishedAt:null,updatedAt:Date.now(),error:null,createdAt:Date.now(),expiresAt:Date.now()+24*60*60*1000};
+  descriptionJobs.set(job.id,job); await persistBulkJob(job,'description'); runDescriptionJob(job).catch(()=>{}); return job;
+}
+
+app.post('/api/group-description/apply', requireAuth, needWA, async (req,res)=>{
+  try {
+    const ids=descriptionValidateIds(req.body?.ids); const action=String(req.body?.action||'update');
+    if(!['update','remove'].includes(action)) throw new Error('Invalid description action.');
+    const description=action==='remove'?'':String(req.body?.description ?? '');
+    if(action==='update' && description.length>512) throw new Error('Group description cannot exceed 512 characters.');
+    if(action==='update' && !description.trim()) throw new Error('Enter a group description first.');
+    const job=await createDescriptionJob(req,action,ids,description); res.json({ok:true,job:descriptionJobPublic(job)});
+  } catch(e){ res.status(400).json({error:descriptionErrorText(e)}); }
+});
+
+app.get('/api/group-description/job/:id', requireAuth, async (req,res)=>{
+  const job=await loadBulkJob(req.params.id,req.user.userId,'description');
+  if(!job || (job.expiresAt && job.expiresAt<=Date.now()&&!['running','queued','paused'].includes(job.state))) return res.status(404).json({error:'Description job not found or expired.'});
+  if(job.state==='paused'&&getWA(req.user.userId).state==='connected') runDescriptionJob(job).catch(()=>{});
+  res.json({job:descriptionJobPublic(job),error:job.error||null});
+});
+
+app.get('/api/group-description/active', requireAuth, async (req,res)=>{
+  const active=await findActiveBulkJob(req.user.userId,'description');
+  const job=active||await findLatestBulkJob(req.user.userId,'description');
+  if(active&&getWA(req.user.userId).state==='connected') runDescriptionJob(active).catch(()=>{});
+  res.json({job:descriptionJobPublic(job)});
+});
+
+app.post('/api/group-description/job/:id/retry', requireAuth, needWA, async (req,res)=>{
+  const old=await loadBulkJob(req.params.id,req.user.userId,'description');
+  if(!old) return res.status(404).json({error:'Description job not found or expired.'});
+  if(['running','queued','paused'].includes(old.state)) return res.status(409).json({error:'The current description job is still active.'});
+  const failed=old.results.filter((x)=>x.status==='failed'); if(!failed.length) return res.status(400).json({error:'There are no failed groups to retry.'});
+  const active=await findActiveBulkJob(req.user.userId,'description'); if(active) return res.status(409).json({error:'Another description job is already active.'});
+  const retry={id:`DESC-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(2).toString('hex')}`,type:'description',userId:old.userId,action:old.action,description:old.description,total:failed.length,results:failed.map((x)=>({...x,status:'pending',error:null})),done:0,success:0,failed:0,current:null,state:'queued',startedAt:null,finishedAt:null,updatedAt:Date.now(),error:null,createdAt:Date.now(),expiresAt:Date.now()+24*60*60*1000};
+  descriptionJobs.set(retry.id,retry); await persistBulkJob(retry,'description'); runDescriptionJob(retry).catch(()=>{}); res.json({ok:true,job:descriptionJobPublic(retry)});
+});
+
+async function resumeBulkJobsForUser(userId) {
+  const wa=getWA(userId); if(wa.state!=='connected'||!wa.sock)return;
+  for(const type of ['dp','description']) {
+    const map=type==='dp'?dpJobs:descriptionJobs;
+    const job=await findActiveBulkJob(userId,type); if(!job)continue;
+    if(job.state==='running') { const running=job.results?.find((x)=>x.status==='running'); if(running) running.status='pending'; job.current=null; }
+    if(type==='dp') { map.set(job.id,job); runDpJob(job).catch(()=>{}); }
+    else { map.set(job.id,job); runDescriptionJob(job).catch(()=>{}); }
+  }
+}
 
 /* ---------- Group permissions ---------- */
 
@@ -3108,6 +3253,10 @@ app.get('/link-organizer.html', (req, res) => {
 
 app.get('/group-dp.html', (req, res) => {
   res.sendFile('group-dp.html', { root: 'public' });
+});
+
+app.get('/group-description.html', (req, res) => {
+  res.sendFile('group-description.html', { root: 'public' });
 });
 
 /* ---------- Static files ---------- */

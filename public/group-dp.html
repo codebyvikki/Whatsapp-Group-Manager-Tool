@@ -1058,39 +1058,26 @@ button.ghost:hover:not(:disabled){
 const $=id=>document.getElementById(id);
 
 const api=async(url,body,options={})=>{
-
-  const o={
-    credentials:'same-origin',
-    ...options
-  };
-
+  const o={credentials:'same-origin',...options};
   if(body!==undefined){
-
     o.method=options.method||'POST';
-
-    o.headers={
-      'Content-Type':'application/json',
-      ...(options.headers||{})
-    };
-
+    o.headers={'Content-Type':'application/json',...(options.headers||{})};
     o.body=JSON.stringify(body);
-
   }
-
-  const r=await fetch(url,o);
-
-  const j=await r.json().catch(()=>({}));
-
-  if(!r.ok){
-
-    throw Object.assign(
-      new Error(j.error||'Request failed'),
-      {status:r.status}
-    );
-
+  let lastError;
+  for(let attempt=0;attempt<4;attempt++){
+    try{
+      const r=await fetch(url,o);
+      const j=await r.json().catch(()=>({}));
+      if(!r.ok) throw Object.assign(new Error(j.error||'Request failed'),{status:r.status});
+      return j;
+    }catch(e){
+      lastError=e;
+      if(e?.status && e.status!==502 && e.status!==503 && e.status!==504) throw e;
+      if(attempt<3) await wait(500*(attempt+1));
+    }
   }
-
-  return j;
+  throw lastError||new Error('Network request failed');
 };
 
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
@@ -1164,39 +1151,16 @@ function startWaMonitor(){
 }
 
 async function gate(){
-
   try{
-
     const me=await api('/api/me');
-
-    if(!me.loggedIn){
-
-      location.replace('/dashboard.html');
-
-      return false;
-
-    }
-
+    if(!me.loggedIn){location.replace('/dashboard.html');return false}
     const s=await api('/api/status');
-
-    if(s.state!=='connected'){
-
-      location.replace('/dashboard.html');
-
-      return false;
-
-    }
-
+    updateWaStatus(s.state==='connected'?'connected':'disconnected');
     return true;
-
   }catch{
-
     location.replace('/dashboard.html');
-
     return false;
-
   }
-
 }
 
 function setAction(next){
@@ -1835,32 +1799,35 @@ function renderJob(job){
 }
 
 async function pollJob(id){
-
-  for(;;){
-
-    const j=
-      (
-        await api(
-          '/api/group-dp/job/'+
-          encodeURIComponent(id)
-        )
-      ).job;
-
-    renderJob(j);
-
-    if(
-      j.state==='finished'||
-      j.state==='error'
-    ){
-
-      return;
-
+  let transientFailures=0;
+  while(true){
+    try{
+      const j=(await api('/api/group-dp/job/'+encodeURIComponent(id))).job;
+      transientFailures=0;
+      renderJob(j);
+      if(j.state==='finished'||j.state==='error') return;
+      await wait(700);
+    }catch(e){
+      if(e?.status===404){
+        $('err').textContent='This job is no longer available.';
+        return;
+      }
+      transientFailures++;
+      $('progress').textContent=`Connection hiccup — reconnecting to job… (attempt ${transientFailures})`;
+      await wait(Math.min(5000,700*transientFailures));
     }
-
-    await wait(600);
-
   }
+}
 
+async function restoreJob(){
+  try{
+    const j=(await api('/api/group-dp/active')).job;
+    if(!j)return;
+    renderJob(j);
+    if(j.state!=='finished'&&j.state!=='error') await pollJob(j.id);
+  }catch(e){
+    if(e?.status!==401) $('err').textContent='Could not restore the previous DP task. Refresh to retry.';
+  }
 }
 
 $('applyBtn').onclick=async()=>{
@@ -1986,6 +1953,8 @@ gate().then(ok=>{
     loadLists();
 
     startWaMonitor();
+
+    restoreJob();
 
   }
 
