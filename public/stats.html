@@ -1460,6 +1460,16 @@ button.small {
           List · CSV
         </button>
 
+
+        <button
+          class="ghost small"
+          id="tagsList"
+          type="button"
+          title="Create tags from the current section using selected groups"
+        >
+          Tags List
+        </button>
+
       </div>
 
 
@@ -2546,6 +2556,58 @@ $('refresh').onclick =
     }
 
   };
+
+
+$('tagsList').onclick = () => {
+
+  $('err').textContent = '';
+
+  try {
+
+    /*
+      Reuse the exact rows already loaded on Live Stats.
+      No refresh/API call is made here, so the hand-off is immediate.
+      If anything is selected, export only those groups; otherwise use all.
+    */
+    const source =
+      sel.size
+        ? rows.filter((r) => sel.has(r.id))
+        : rows;
+
+    if (!source.length) {
+      $('err').textContent = 'No groups available for Tags List.';
+      return;
+    }
+
+    const payload = {
+      version: 1,
+      tab,
+      createdAt: Date.now(),
+      groups: source.map((r) => ({
+        name: String(r.name || ''),
+        members: Number(main(r) || 0),
+        country: ''
+      }))
+    };
+
+    /* Same-origin sessionStorage gives the Tags page the data without
+       touching the existing stats backend or making another network call. */
+    sessionStorage.setItem(
+      'waTagsImport',
+      JSON.stringify(payload)
+    );
+
+    window.location.href = '/tags-list.html';
+
+  } catch (e) {
+
+    console.error('[tags-list]', e);
+    $('err').textContent =
+      'Could not create Tags List.';
+
+  }
+
+};
 
 
 $('copyList').onclick =

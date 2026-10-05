@@ -1,0 +1,2170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Contacts and Groups</title>
+<style>
+*{
+    box-sizing:border-box;
+}
+
+body{
+    margin:0;
+    padding:20px;
+    font-family:Arial,"Microsoft YaHei",sans-serif;
+    background:#eef2f6;
+    color:#222;
+}
+.title{
+    display:block;
+    width:100%;
+    text-align:center;
+    font-family:"Segoe UI", Arial, sans-serif;
+    font-size:30px;
+    font-weight:700;
+    letter-spacing:0.4px;
+    color:#1f2937;
+    margin:5px 0 16px;
+    line-height:1.2;
+    border:0;
+    outline:0;
+    background:transparent;
+    padding:0;
+}
+
+.stats{
+    display:flex;
+    gap:14px;
+    flex-wrap:wrap;
+    margin-top:18px;
+    margin-bottom:16px;
+    align-items:flex-start;
+}
+
+.stats > .stat:not(.profile){
+    position:relative;
+    top:29px;
+}
+
+.stat{
+    min-width:155px;
+    height:62px;
+
+    border:1px solid #e2e8f0;
+    border-radius:12px;
+
+    background:#ffffff;
+
+    padding:11px 16px;
+
+    box-shadow:
+        0 3px 12px rgba(15,23,42,.06);
+
+    transition:
+        transform .18s ease,
+        box-shadow .18s ease,
+        border-color .18s ease;
+}
+
+.stat:hover{
+    transform:translateY(-2px);
+
+    box-shadow:
+        0 7px 20px rgba(15,23,42,.10);
+
+    border-color:#d6dde6;
+}
+.label{
+    font-size:12px;
+    font-weight:500;
+    color:#64748b;
+    letter-spacing:.2px;
+}
+
+.value{
+    font-size:23px;
+    font-weight:700;
+    color:#111827;
+    margin-top:5px;
+    line-height:1;
+}
+.country input{
+    width:110px;
+    min-width:40px;
+    border:0;
+    font-size:18px;
+    font-weight:700;
+    color:#111827;
+    outline:0;
+    background:transparent;
+    padding:0;
+    margin-top:4px;
+}
+/* PROFILE */
+.profile{
+    margin-left:auto;
+
+    width:max-content;
+    min-width:200px;
+    max-width:520px;
+
+    height:80px;
+
+    padding:10px 16px;
+
+    position:relative;
+    top:10px;
+
+    border:1px solid #e1e7ef;
+    border-radius:14px;
+
+    background:#ffffff;
+
+    box-shadow:
+        0 4px 16px rgba(15,23,42,.07);
+
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+
+    transition:
+        transform .18s ease,
+        box-shadow .18s ease;
+}
+
+.profile:hover{
+    transform:translateY(-2px);
+
+    box-shadow:
+        0 8px 24px rgba(15,23,42,.11);
+}
+
+.profile-content{
+    display:flex;
+    align-items:center;
+    gap:9px;
+    height:56px;
+    width:max-content;
+    max-width:100%;
+    min-width:0;
+}
+/* Round Upload Logo button */
+.profile-logo{
+    width:42px;
+    height:42px;
+    flex:0 0 42px;
+
+    border:0;
+    border-radius:50%;
+
+    background:#fff;
+
+    display:flex;
+    align-items:center;
+    justify-content:center;
+
+    overflow:hidden;
+
+    cursor:pointer;
+
+    color:#666;
+    font-size:10px;
+    line-height:11px;
+    text-align:center;
+}
+
+/* TOP NAVIGATION */
+.tag-page-top{
+    width:100%;
+    display:flex;
+    justify-content:flex-end;
+    align-items:center;
+    gap:8px;
+    margin-bottom:10px;
+    flex-wrap:wrap;
+}
+.tag-nav-btn{
+    border:1px solid #d7dee7;
+    background:#fff;
+    color:#1f2937;
+    border-radius:8px;
+    padding:8px 14px;
+    font-size:14px;
+    font-weight:700;
+    cursor:pointer;
+    box-shadow:0 2px 8px rgba(15,23,42,.06);
+    text-decoration:none;
+}
+.tag-nav-btn:hover{
+    background:#3575b9;
+    color:#fff;
+    border-color:#3575b9;
+}
+
+/* SERVER-SAVED TAG BACKUPS */
+.backup-panel{
+    width:100%;
+    margin-top:10px;
+    padding:10px;
+    border:1px solid #dfe5ec;
+    border-radius:10px;
+    background:#fff;
+    display:flex;
+    align-items:center;
+    gap:8px;
+    flex-wrap:wrap;
+    box-shadow:0 3px 12px rgba(15,23,42,.04);
+}
+.backup-panel select{
+    height:34px;
+    min-width:220px;
+    max-width:100%;
+    border:1px solid #bbb;
+    border-radius:4px;
+    padding:0 9px;
+    background:#fff;
+}
+.backup-panel .backup-label{
+    font-size:13px;
+    font-weight:700;
+    color:#475569;
+}
+.backup-panel .backup-status{
+    font-size:12px;
+    color:#64748b;
+    margin-left:auto;
+}
+.backup-save{background:#0a8f4a}
+.backup-delete{background:#d9534f}
+@media(max-width:700px){
+    .backup-panel .backup-status{width:100%;margin-left:0}
+    .backup-panel select{flex:1;min-width:160px}
+}
+
+#downloadArea{
+    width:100%;
+    background:#ffffff;
+    border:1px solid #e1e6eb;
+    border-radius:18px;
+    padding:22px;
+    box-shadow:
+        0 8px 30px rgba(15,23,42,.08);
+}
+
+/* Uploaded logo */
+.profile-logo img{
+    width:100%;
+    height:100%;
+    object-fit:cover;
+    display:none;
+}
+
+/* Hide Choose File completely */
+.profile-logo input[type="file"]{
+    display:none;
+}
+
+/* Profile Name */
+#profileName{
+    font-size:21px;
+    font-weight:bold;
+    color:#000;
+    white-space:nowrap;
+    max-width:420px;
+    min-width:0;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    cursor:pointer;
+}
+
+
+.color-btn{
+    background:#e67e22;
+}
+
+.profile-text{
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+    flex:0 1 auto;
+    min-width:0;
+    max-width:420px;
+    overflow:hidden;
+}
+
+#profileTagline{
+    font-size:10px;
+    font-weight:500;
+    color:#666;
+    margin-top:2px;
+    white-space:nowrap;
+    max-width:420px;
+    min-width:0;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    cursor:pointer;
+}
+
+/* Edit button */
+.profile button{
+    border:0;
+    background:transparent;
+    color:#3575b9;
+    cursor:pointer;
+    font-size:16px;
+    padding:3px 5px;
+}
+.panel{
+    border:1px solid #e1e6eb;
+    border-radius:14px;
+
+    padding:12px;
+
+    min-height:350px;
+
+    background:#ffffff;
+
+    box-shadow:
+        0 4px 18px rgba(15,23,42,.06);
+
+    overflow:visible;
+}
+.toolbar{display:flex;gap:7px;margin-bottom:7px;flex-wrap:wrap}.toolbar input,.toolbar select{height:31px;border:1px solid #bbb;border-radius:3px;padding:0 8px}.toolbar input{flex:1;min-width:180px}
+/* GROUP TAG AREA */
+.tags{
+    display:flex;
+    flex-wrap:wrap;
+    align-items:flex-start;
+    justify-content:center;
+    gap:10px;
+    padding:12px;
+    background:#fff;
+}
+
+/* EACH GROUP TAG */
+.tag{
+    display:inline-flex;
+    align-items:center;
+
+    width:max-content;
+    max-width:100%;
+    min-width:0;
+
+    height:38px;
+
+    background:#006b3c;
+    color:#fff;
+
+    border-radius:7px;
+    padding:0;
+
+    font-size:15px;
+    white-space:nowrap;
+
+    overflow:visible;
+    cursor:pointer;
+
+    flex:0 0 auto;
+}
+
+/* GROUP NAME SECTION */
+.tag-name{
+    display:flex;
+    align-items:center;
+    justify-content:flex-start;
+    height:34px;
+    padding:0 9px;
+    flex:0 1 auto;
+    min-width:0;
+    white-space:nowrap;
+    line-height:1;
+    font-size:20px;
+    font-weight:700;
+    font-family:Arial, "Microsoft YaHei", sans-serif;
+    -webkit-text-stroke:0.15px currentColor;
+}
+/* MEMBERS SECTION — OLD ROUND/PILL STYLE */
+.members{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    flex:0 0 auto;
+    height:24px;
+    font-size:14px;
+    font-weight:700;
+    background:#ffffff2b;
+    padding:1px 6px;
+    margin-left:3px;
+    border-radius:999px;
+    white-space:nowrap;
+}
+
+/* SEPARATE X SECTION */
+.tag button{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+
+    flex:0 0 29px;
+    width:29px;
+    min-width:29px;
+    max-width:29px;
+
+    height:38px;
+
+    margin-left:3px;
+
+    border:0;
+    border-left:2px solid #fff;
+
+    background:transparent;
+    color:#fff;
+
+    cursor:pointer;
+
+    font-size:16px;
+    line-height:1;
+
+    padding:0;
+}
+
+
+
+.tag button:hover{
+    background:rgba(0,0,0,.12);
+}
+.controls{margin-top:10px;display:flex;gap:8px}.btn{border:0;border-radius:3px;color:#fff;padding:7px 13px;cursor:pointer;font-size:14px}.save,.add{background:#0a8f4a}.clear{background:#d9534f}.blue{background:#3575b9}
+.addrow{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}.addrow input{height:34px;border:1px solid #bbb;border-radius:3px;padding:0 9px}.name{width:330px}.num{width:140px}.status{font-size:13px;color:#666;min-height:18px;margin-top:7px}
+.modalbg{display:none;position:fixed;inset:0;background:#0007;align-items:center;justify-content:center;padding:15px}.modal{background:#fff;padding:18px;border-radius:6px;width:min(430px,100%)}.modal h3{margin:0 0 12px}.modal label{display:block;font-size:13px;margin:8px 0 4px}.modal input{width:100%;height:35px;padding:0 9px;border:1px solid #bbb;border-radius:3px}.actions{display:flex;justify-content:flex-end;gap:7px;margin-top:14px}
+.download{
+    background:#3575b9;
+}
+
+.modal-header{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-start;
+    margin-bottom:12px;
+}
+
+.modal-header h3{
+    margin:0;
+}
+
+/* INDIVIDUAL TAG COLOR PICKER */
+
+.edit-color-picker{
+    position:relative;
+}
+
+.edit-color-btn{
+    background:#e67e22;
+}
+
+.edit-color-palette{
+    display:none;
+
+    position:absolute;
+
+    top:38px;
+    right:0;
+
+    z-index:2000;
+
+    width:190px;
+
+    padding:10px;
+
+    background:#fff;
+
+    border:1px solid #d5d5d5;
+
+    border-radius:8px;
+
+    box-shadow:0 5px 18px rgba(0,0,0,.18);
+
+    grid-template-columns:repeat(5, 28px);
+
+    gap:8px;
+
+    justify-content:center;
+}
+
+.edit-color-option{
+    width:28px;
+    height:28px;
+
+    padding:0;
+
+    border:2px solid #fff;
+
+    border-radius:50%;
+
+    cursor:pointer;
+
+    box-shadow:0 0 0 1px #ccc;
+
+    position:relative;
+}
+
+.edit-color-option:hover{
+    transform:scale(1.12);
+}
+
+.edit-color-option.selected{
+    box-shadow:
+        0 0 0 2px #222,
+        0 0 0 4px #fff;
+}
+
+.edit-custom-color{
+    width:28px;
+    height:28px;
+    border-radius:50%;
+    border:2px dashed #999;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    cursor:pointer;
+    background:#fff;
+    position:relative;
+    font-size:18px;
+    line-height:1;
+    color:#555;
+    box-sizing:border-box;
+    padding:0;
+}
+
+.edit-custom-color span{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    width:100%;
+    height:100%;
+    line-height:1;
+    margin:0;
+    padding:0;
+    transform:translateY(-1px);
+}
+
+
+.edit-custom-color:hover{
+    background:#f3f3f3;
+}
+
+.edit-custom-color input{
+    position:absolute;
+
+    inset:0;
+
+    width:100%;
+    height:100%;
+
+    opacity:0;
+
+    cursor:pointer;
+}
+
+/* TAG COLOR PALETTE */
+
+.color-picker-wrap{
+    position:relative;
+    margin-left:auto;
+}
+
+.color-palette{
+    display:none;
+
+    position:absolute;
+
+    top:42px;
+    right:0;
+
+    z-index:1000;
+
+    width:190px;
+
+    padding:10px;
+
+    background:#fff;
+
+    border:1px solid #d5d5d5;
+
+    border-radius:8px;
+
+    box-shadow:0 5px 18px rgba(0,0,0,.18);
+
+    grid-template-columns:repeat(5, 28px);
+
+    gap:8px;
+
+    justify-content:center;
+}
+
+.color-option{
+    width:28px;
+    height:28px;
+
+    padding:0;
+
+    border:2px solid #fff;
+
+    border-radius:50%;
+
+    cursor:pointer;
+
+    box-shadow:0 0 0 1px #ccc;
+
+    position:relative;
+}
+
+.color-option:hover{
+    transform:scale(1.12);
+}
+
+.color-option.selected{
+    box-shadow:
+        0 0 0 2px #222,
+        0 0 0 4px #fff;
+}
+
+.custom-color-option{
+    width:28px;
+    height:28px;
+
+    border-radius:50%;
+
+    border:2px dashed #999;
+
+    display:flex;
+
+    align-items:center;
+    justify-content:center;
+
+    cursor:pointer;
+
+    background:#fff;
+
+    position:relative;
+
+    font-size:18px;
+    color:#555;
+}
+
+.custom-color-option:hover{
+    background:#f3f3f3;
+}
+
+.custom-color-option input{
+    position:absolute;
+
+    inset:0;
+
+    width:100%;
+    height:100%;
+
+    opacity:0;
+
+    cursor:pointer;
+}
+
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+</head>
+<body>
+
+<div class="tag-page-top">
+    <a class="tag-nav-btn" href="/stats.html">📊 Live Stats</a>
+    <a class="tag-nav-btn" href="/dashboard.html">🏠 Dashboard</a>
+</div>
+
+<div id="downloadArea">
+
+<input
+    id="listTitle"
+    class="title"
+    value="VALID LIST"
+    onchange="saveListTitle()"
+    onkeydown="if(event.key==='Enter') this.blur()"
+>
+
+<div class="stats">
+
+  <div class="stat">
+    <div class="label">Total Groups</div>
+    <div class="value" id="totalGroups">0</div>
+  </div>
+
+  <div class="stat">
+    <div class="label">Total Members</div>
+    <div class="value" id="totalMembers">0</div>
+  </div>
+
+  <div class="stat country">
+    <div class="label">Country</div>
+    <input
+        id="country"
+        value="USA"
+        oninput="resizeCountryInput()"
+        onchange="saveDefaultCountry()"
+    >
+  </div>
+
+  <div class="stat profile">
+    <div class="label">Company</div>
+
+    <div class="profile-content">
+
+      <label
+        class="profile-logo"
+        title="Click to upload / change logo"
+      >
+
+        <img
+          id="profileLogo"
+          alt="Profile Logo"
+        >
+
+        <span id="profileLogoText">
+          Upload<br>Logo
+        </span>
+
+        <input
+          id="profileLogoInput"
+          type="file"
+          accept="image/*"
+          onchange="uploadProfileLogo(event)"
+        >
+
+      </label>
+
+
+      <div class="profile-text">
+
+          <span
+              id="profileName"
+              onclick="editProfile()"
+              title="Click to edit name"
+          >WS PRIME</span>
+
+          <span
+              id="profileTagline"
+              onclick="editTagline()"
+              title="Click to edit tagline"
+          >Build on Trust, Driven by Results</span>
+
+      </div>
+
+    </div>
+
+  </div>
+
+</div>
+
+<div class="panel">
+
+    <div class="toolbar">
+
+        <input
+            id="search"
+            placeholder="Search group..."
+            oninput="render()"
+        >
+
+        <select
+            id="filter"
+            onchange="countrySelected()"
+        >
+            <option value="">All Countries</option>
+        </select>
+
+    </div>
+
+    <div id="tags" class="tags"></div>
+
+</div>
+
+</div>
+
+<div class="controls">
+
+ <button class="btn save" onclick="saveList()">
+   💾 Save List
+ </button>
+
+ <button class="btn clear" onclick="clearAll()">
+   🧹 Clear List
+ </button>
+
+ <button class="btn download" onclick="downloadList()">
+   ⬇️ Download List
+ </button>
+
+<div class="color-picker-wrap">
+
+    <button
+        class="btn color-btn"
+        onclick="toggleColorPalette()"
+    >
+        🎨 Tag Color
+    </button>
+
+    <div id="colorPalette" class="color-palette">
+
+        <button class="color-option" data-color="#C62828" style="background:#b30202" onclick="selectTagColor('#b30202')"></button>
+        <button class="color-option" data-color="#1565C0" style="background:#01169a" onclick="selectTagColor('#01169a')"></button>
+        <button class="color-option" data-color="#00843D" style="background:#00813c" onclick="selectTagColor('#00813c')"></button>
+        <button class="color-option" data-color="#D35400" style="background:#b34800" onclick="selectTagColor('#b34800')"></button>
+        <button class="color-option" data-color="#212121" style="background:#212121" onclick="selectTagColor('#212121')"></button>
+        <button class="color-option" data-color="#512DA8" style="background:#44258b" onclick="selectTagColor('#44258b')"></button>
+        <button class="color-option" data-color="#AD1457" style="background:#99114c" onclick="selectTagColor('#99114c')"></button>
+        <button class="color-option" data-color="#00796B" style="background:#00685c" onclick="selectTagColor('#00685c')"></button>
+        <button class="color-option" data-color="#455A64" style="background:#374951" onclick="selectTagColor('#374951')"></button>
+        <label class="custom-color-option" title="Custom color">
+
+            <span>＋</span>
+
+            <input
+                id="customTagColor"
+                type="color"
+                onchange="selectTagColor(this.value)"
+            >
+
+        </label>
+
+    </div>
+
+</div>
+
+ <button
+ id="undoBtn"
+ class="btn blue"
+ onclick="undoDelete()"
+ style="display:none;"
+ >
+ ↩ Undo
+</button>
+
+</div>
+
+<div class="backup-panel">
+    <span class="backup-label">☁ Saved Tags Lists</span>
+    <select id="savedTagList">
+        <option value="">No saved lists</option>
+    </select>
+    <button class="btn blue" type="button" onclick="loadSelectedBackup()">Load</button>
+    <button class="btn backup-save" type="button" onclick="saveBackup()">💾 Save Backup</button>
+    <button class="btn" type="button" style="background:#64748b" onclick="saveBackupAs()">＋ Save As</button>
+    <button class="btn backup-delete" type="button" onclick="deleteSelectedBackup()">🗑 Delete</button>
+    <span class="backup-status" id="backupStatus">Not loaded</span>
+</div>
+
+<div class="addrow">
+ <input class="name" id="newName" placeholder="Enter group name">
+ <input class="num" id="newMembers" type="number" min="0" placeholder="Members">
+ <input class="num" id="newCountry" placeholder="Country">
+ <button class="btn add" onclick="addGroup()">＋ Add</button>
+</div>
+<div id="status" class="status"></div>
+
+<div id="modal" class="modalbg">
+
+  <div class="modal">
+
+    <div class="modal-header">
+      <h3>Edit Group</h3>
+
+        <div class="edit-color-picker">
+
+            <button
+                type="button"
+                class="btn edit-color-btn"
+                onclick="toggleEditColorPalette()"
+            >
+                🎨 Color
+            </button>
+
+            <div
+                id="editColorPalette"
+                class="edit-color-palette"
+            >
+
+                <button class="edit-color-option" data-color="#C62828" style="background:#b30202" onclick="selectEditTagColor('#b30202')"></button>
+                <button class="edit-color-option" data-color="#1565C0" style="background:#01169a" onclick="selectEditTagColor('#01169a')"></button>
+                <button class="edit-color-option" data-color="#00843D" style="background:#00813c" onclick="selectEditTagColor('#00813c')"></button>
+                <button class="edit-color-option" data-color="#D35400" style="background:#b34800" onclick="selectEditTagColor('#b34800')"></button>
+                <button class="edit-color-option" data-color="#212121" style="background:#212121" onclick="selectEditTagColor('#212121')"></button>
+                <button class="edit-color-option" data-color="#512DA8" style="background:#44258b" onclick="selectEditTagColor('#44258b')"></button>
+                <button class="edit-color-option" data-color="#AD1457" style="background:#99114c" onclick="selectEditTagColor('#99114c')"></button>
+                <button class="edit-color-option" data-color="#00796B" style="background:#00685c" onclick="selectEditTagColor('#00685c')"></button>
+                <button class="edit-color-option" data-color="#455A64" style="background:#374951" onclick="selectEditTagColor('#374951')"></button>
+
+                <label
+                    class="edit-custom-color"
+                    title="Custom color"
+                >
+
+                    <span>＋</span>
+
+                    <input
+                        id="editCustomColor"
+                        type="color"
+                        onchange="selectEditTagColor(this.value)"
+                    >
+
+                </label>
+
+            </div>
+
+        </div>
+    </div>
+
+    <label>Group name</label>
+    <input id="eName">
+
+    <label>Country</label>
+    <input id="eCountry">
+
+    <label>Members</label>
+    <input id="eMembers" type="number" min="0">
+
+    <div class="actions">
+      <button class="btn clear" onclick="closeEdit()">Cancel</button>
+      <button class="btn save" onclick="applyEdit()">Save</button>
+    </div>
+
+  </div>
+
+</div>
+
+<div id="duplicateModal" class="modalbg">
+
+  <div class="modal" style="text-align:center;">
+
+    <h3>⚠️ This group already exists.</h3>
+
+    <div class="actions" style="justify-content:center;">
+
+      <button
+        class="btn clear"
+        onclick="skipDuplicate()"
+      >
+        Skip
+      </button>
+
+      <button
+        class="btn save"
+        onclick="addDuplicate()"
+      >
+        Add
+      </button>
+
+    </div>
+
+  </div>
+
+</div>
+
+<script>
+const defaults=[{"name":"Booking 限时推广 BF2","members":0,"country":"USA"},{"name":"Booking 限时推广 BF1","members":0,"country":"USA"},{"name":"Booking 限时推广 BF4","members":0,"country":"USA"},{"name":"Booking 限时推广 BF6","members":0,"country":"USA"},{"name":"Booking 限时推广 BF8","members":0,"country":"USA"},{"name":"Booking 限时推广 BF72","members":0,"country":"USA"},{"name":"Booking 限时推广 BF20","members":0,"country":"USA"},{"name":"Booking 限时推广 BF53","members":0,"country":"USA"},{"name":"Booking 限时推广 BF19","members":0,"country":"USA"},{"name":"Booking 限时推广 BF18","members":0,"country":"USA"},{"name":"Booking 限时推广 BF99","members":0,"country":"USA"},{"name":"Booking 限时推广 BF98","members":0,"country":"USA"},{"name":"Booking 限时推广 BF15","members":0,"country":"USA"},{"name":"Booking 限时推广 BF97","members":0,"country":"USA"},{"name":"Booking 限时推广 BF96","members":0,"country":"USA"},{"name":"Booking 限时推广 BF70","members":0,"country":"USA"},{"name":"Booking 限时推广 BF56","members":0,"country":"USA"},{"name":"Booking 限时推广 BF10","members":0,"country":"USA"},{"name":"Booking 限时推广 BF75","members":0,"country":"USA"},{"name":"Booking 限时推广 BF12","members":0,"country":"USA"},{"name":"Booking 限时推广 BF94","members":0,"country":"USA"},{"name":"Booking 限时推广 BF11","members":0,"country":"USA"},{"name":"Booking 限时推广 BF31","members":0,"country":"USA"},{"name":"Booking 限时推广 BF73","members":0,"country":"USA"},{"name":"Booking 限时推广 BF93","members":0,"country":"USA"},{"name":"Booking 限时推广 BF32","members":0,"country":"USA"},{"name":"Booking 限时推广 BF52","members":0,"country":"USA"},{"name":"Booking 限时推广 BF34","members":0,"country":"USA"},{"name":"Booking 限时推广 BF37","members":0,"country":"USA"},{"name":"Booking 限时推广 BF90","members":0,"country":"USA"},{"name":"Booking 限时推广 BF79","members":0,"country":"USA"},{"name":"Booking 限时推广 BF89","members":0,"country":"USA"},{"name":"Booking 限时推广 BF40","members":0,"country":"USA"},{"name":"Booking 限时推广 BF68","members":0,"country":"USA"},{"name":"Booking 限时推广 BF88","members":0,"country":"USA"},{"name":"Booking 限时推广 BF80","members":0,"country":"USA"},{"name":"Booking 限时推广 BF23","members":0,"country":"USA"},{"name":"Booking 限时推广 BF48","members":0,"country":"USA"},{"name":"Booking 限时推广 BF86","members":0,"country":"USA"},{"name":"Booking 限时推广 BF24","members":0,"country":"USA"},{"name":"Booking 限时推广 BF74","members":0,"country":"USA"},{"name":"Booking 限时推广 BF33","members":0,"country":"USA"},{"name":"Booking 限时推广 BF49","members":0,"country":"USA"},{"name":"Booking 限时推广 BF38","members":0,"country":"USA"},{"name":"Booking 限时推广 BF39","members":0,"country":"USA"},{"name":"Booking 限时推广 BF21","members":0,"country":"USA"},{"name":"Booking 限时推广 BF36","members":0,"country":"USA"},{"name":"Booking 限时推广 BF62","members":0,"country":"USA"},{"name":"Booking 限时推广 BF22","members":0,"country":"USA"},{"name":"Booking 限时推广 BF76","members":0,"country":"USA"},{"name":"Booking 限时推广 BF30","members":0,"country":"USA"},{"name":"Booking 限时推广 BF42","members":0,"country":"USA"},{"name":"Booking 限时推广 BF58","members":0,"country":"USA"},{"name":"Booking 限时推广 BF45","members":0,"country":"USA"},{"name":"Booking 限时推广 BF44","members":0,"country":"USA"},{"name":"Booking 限时推广 BF50","members":0,"country":"USA"},{"name":"Booking 限时推广 BF51","members":0,"country":"USA"},{"name":"Booking 限时推广 BF59","members":0,"country":"USA"},{"name":"Booking 限时推广 BF46","members":0,"country":"USA"},{"name":"Booking 限时推广 BF102","members":0,"country":"USA"},{"name":"Booking 限时推广 BF100","members":0,"country":"USA"},{"name":"Booking 限时推广 BF105","members":0,"country":"USA"},{"name":"Booking 限时推广 BF109","members":0,"country":"USA"},{"name":"Booking 限时推广 BF110","members":0,"country":"USA"},{"name":"Booking 限时推广 BF111","members":0,"country":"USA"},{"name":"Booking 限时推广 BF113","members":0,"country":"USA"},{"name":"Booking 限时推广 BF114","members":0,"country":"USA"},{"name":"Booking 限时推广 BF115","members":0,"country":"USA"},{"name":"Booking 限时推广 BF116","members":0,"country":"USA"},{"name":"Booking 限时推广 BF119","members":0,"country":"USA"},{"name":"Booking 限时推广 BF117","members":0,"country":"USA"}];
+/* LIVE STATS → TAGS LIST import bridge
+   Receives the current Live Stats tab (Pending / Invite links / Added / Total members)
+   through same-origin sessionStorage, then hands the data to the existing Tags UI. */
+let importedTagPayload = null;
+try {
+    const rawImport = sessionStorage.getItem("waTagsImport");
+    if(rawImport){
+        const parsed = JSON.parse(rawImport);
+        if(parsed && Array.isArray(parsed.groups) && parsed.groups.length){
+            importedTagPayload = parsed;
+            sessionStorage.removeItem("waTagsImport");
+        }
+    }
+} catch(error){
+    console.error("[tags-list] import failed:", error);
+}
+
+let data = importedTagPayload
+    ? importedTagPayload.groups.map(function(g){
+        return {
+            name: String(g.name || ""),
+            members: Number(g.members || 0),
+            country: "",
+            color: localStorage.getItem("tagColor") || "#006b3c"
+        };
+    })
+    : (JSON.parse(localStorage.getItem("groupManagerData")||"null")||defaults);
+
+if(importedTagPayload){
+    /* Keep the imported list as the normal editable Tags List dataset. */
+    localStorage.setItem("groupManagerData", JSON.stringify(data));
+}
+let editIndex=-1;
+let duplicatePending=null;
+
+let deletedGroups = [];
+let tagBackups = [];
+let activeBackupName = '';
+let backupReady = false;
+let backupAutosaveTimer = null;
+
+const apiJSON = async function(url, options){
+    const response = await fetch(url, Object.assign({
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin'
+    }, options || {}));
+    let body = null;
+    try { body = await response.json(); } catch {}
+    if(!response.ok){
+        const err = new Error(body?.error || `Request failed (${response.status})`);
+        err.status = response.status;
+        throw err;
+    }
+    return body;
+};
+
+function buildTagSnapshot(){
+    return {
+        version: 1,
+        groups: data.map(function(g){
+            return {
+                name: String(g.name || ''),
+                members: Number(g.members || 0),
+                country: String(g.country || ''),
+                color: String(g.color || localStorage.getItem('tagColor') || '#006b3c')
+            };
+        }),
+        listTitle: String($('listTitle')?.value || 'VALID LIST'),
+        country: String($('country')?.value || ''),
+        profileName: String($('profileName')?.textContent || ''),
+        profileTagline: String($('profileTagline')?.textContent || ''),
+        profileLogo: String($('profileLogo')?.getAttribute('src') || ''),
+        tagColor: String(localStorage.getItem('tagColor') || '#006b3c')
+    };
+}
+
+function applyTagSnapshot(snapshot){
+    if(!snapshot || !Array.isArray(snapshot.groups)) return false;
+    data = snapshot.groups.map(function(g){
+        return {
+            name: String(g.name || ''),
+            members: Number(g.members || 0),
+            country: String(g.country || ''),
+            color: String(g.color || snapshot.tagColor || '#006b3c')
+        };
+    });
+    if($('listTitle')) $('listTitle').value = snapshot.listTitle || 'VALID LIST';
+    if($('country')) $('country').value = snapshot.country || '';
+    if($('profileName')) $('profileName').textContent = snapshot.profileName || 'WS PRIME';
+    if($('profileTagline')) $('profileTagline').textContent = snapshot.profileTagline || 'Build on Trust, Driven by Results';
+    if(snapshot.profileLogo){
+        $('profileLogo').src = snapshot.profileLogo;
+        $('profileLogo').style.display = 'block';
+        $('profileLogoText').style.display = 'none';
+    }else{
+        $('profileLogo').removeAttribute('src');
+        $('profileLogo').style.display = 'none';
+        $('profileLogoText').style.display = 'block';
+    }
+    localStorage.setItem('groupManagerData', JSON.stringify(data));
+    if(snapshot.listTitle) localStorage.setItem('listTitle', snapshot.listTitle);
+    if(snapshot.country) localStorage.setItem('defaultCountry', snapshot.country);
+    if(snapshot.profileName) localStorage.setItem('profileName', snapshot.profileName);
+    if(snapshot.profileTagline) localStorage.setItem('profileTagline', snapshot.profileTagline);
+    if(snapshot.profileLogo) localStorage.setItem('profileLogo', snapshot.profileLogo);
+    if(snapshot.tagColor) localStorage.setItem('tagColor', snapshot.tagColor);
+    render();
+    updateSelectedColor();
+    resizeCountryInput();
+    return true;
+}
+
+function renderBackupOptions(){
+    const select = $('savedTagList');
+    if(!select) return;
+    select.innerHTML = '';
+    if(!tagBackups.length){
+        const o=document.createElement('option');
+        o.value=''; o.textContent='No saved lists'; select.appendChild(o);
+        return;
+    }
+    tagBackups.forEach(function(b){
+        const o=document.createElement('option');
+        o.value=b.name;
+        const d=b.updatedAt ? new Date(b.updatedAt).toLocaleString() : '';
+        o.textContent=b.name + (d ? ' · ' + d : '');
+        select.appendChild(o);
+    });
+    if(activeBackupName && tagBackups.some(b=>b.name===activeBackupName)){
+        select.value=activeBackupName;
+    }
+}
+
+async function loadBackups(){
+    try{
+        const me = await apiJSON('/api/me');
+        if(!me.loggedIn){ location.href='/'; return; }
+        const result = await apiJSON('/api/tag-backups', { method:'GET' });
+        tagBackups = Array.isArray(result.backups) ? result.backups : [];
+        renderBackupOptions();
+        backupReady = true;
+        $('backupStatus').textContent = tagBackups.length
+            ? `${tagBackups.length} saved list${tagBackups.length===1?'':'s'}`
+            : 'No cloud backups yet';
+    }catch(e){
+        console.error('[tag-backups]', e);
+        $('backupStatus').textContent = e.status===401 ? 'Login required' : 'Backup server unavailable';
+    }
+}
+
+async function saveBackupAs(){
+    const name = prompt('Enter a name for this Tags List backup:', activeBackupName || 'My Tags List');
+    if(name===null) return;
+    const clean=name.trim();
+    if(!clean){ alert('Please enter a backup name.'); return; }
+    await saveBackupWithName(clean);
+}
+
+async function saveBackup(){
+    if(!activeBackupName) return saveBackupAs();
+    await saveBackupWithName(activeBackupName);
+}
+
+async function saveBackupWithName(name){
+    try{
+        const result=await apiJSON('/api/tag-backups',{
+            method:'POST',
+            body:JSON.stringify({name, snapshot:buildTagSnapshot()})
+        });
+        tagBackups=Array.isArray(result.backups)?result.backups:[];
+        activeBackupName=name;
+        renderBackupOptions();
+        $('backupStatus').textContent='Saved securely to your account';
+    }catch(e){
+        alert(e.message || 'Could not save backup.');
+    }
+}
+
+async function loadSelectedBackup(){
+    const name=$('savedTagList')?.value || '';
+    const backup=tagBackups.find(b=>b.name===name);
+    if(!backup) return;
+    if(!confirm(`Load saved Tags List "${name}"? Your current unsaved changes will be replaced.`)) return;
+    if(applyTagSnapshot(backup.snapshot)){
+        activeBackupName=name;
+        $('backupStatus').textContent='Loaded from your account';
+        renderBackupOptions();
+    }
+}
+
+async function deleteSelectedBackup(){
+    const name=$('savedTagList')?.value || '';
+    if(!name) return;
+    if(!confirm(`Delete saved Tags List "${name}"? This cannot be undone.`)) return;
+    try{
+        const result=await apiJSON('/api/tag-backups/delete',{
+            method:'POST',
+            body:JSON.stringify({name})
+        });
+        tagBackups=Array.isArray(result.backups)?result.backups:[];
+        if(activeBackupName===name) activeBackupName='';
+        renderBackupOptions();
+        $('backupStatus').textContent='Backup deleted';
+    }catch(e){
+        alert(e.message || 'Could not delete backup.');
+    }
+}
+
+function queueBackupAutosave(){
+    if(!backupReady || !activeBackupName) return;
+    clearTimeout(backupAutosaveTimer);
+    backupAutosaveTimer=setTimeout(function(){
+        saveBackupWithName(activeBackupName).catch(function(){});
+    },1200);
+}
+
+
+const $=id=>document.getElementById(id);
+
+function saveData(){localStorage.setItem("groupManagerData",JSON.stringify(data));queueBackupAutosave()}
+function fmt(n){return Number(n||0).toLocaleString("en-IN")}
+function stats(){
+ $("totalGroups").textContent=data.length;
+ $("totalMembers").textContent=fmt(data.reduce((a,g)=>a+Number(g.members||0),0));
+ const old=$("filter").value, cs=[...new Set(data.map(g=>g.country).filter(Boolean))].sort();
+ $("filter").innerHTML='<option value="">All Countries</option>'+cs.map(c=>'<option>'+esc(c)+'</option>').join("");
+ if(cs.includes(old))$("filter").value=old;
+}
+
+function countrySelected(){
+    render();
+}
+
+function esc(s){return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]))}
+
+
+function resizeCountryInput(){
+    const input = $("country");
+    if(!input) return;
+
+    const temp = document.createElement("span");
+    temp.style.position = "absolute";
+    temp.style.visibility = "hidden";
+    temp.style.whiteSpace = "pre";
+    temp.style.font = getComputedStyle(input).font;
+    temp.textContent = input.value || "Country";
+
+    document.body.appendChild(temp);
+
+    input.style.width = Math.max(40, temp.offsetWidth + 8) + "px";
+
+    temp.remove();
+}
+
+
+/* PROFILE NAME */
+
+function editProfile(){
+
+    const current =
+        localStorage.getItem("profileName") ||
+        $("profileName").textContent ||
+        "Vikki";
+
+    const name = prompt(
+        "Enter profile name:",
+        current
+    );
+
+    if(name === null) return;
+
+    const cleanName = name.trim();
+
+    if(!cleanName) return;
+
+    $("profileName").textContent = cleanName;
+
+    localStorage.setItem(
+        "profileName",
+        cleanName
+    );
+
+    queueBackupAutosave();
+    msg("Profile name saved.");
+}
+
+function editTagline(){
+
+    const current =
+        localStorage.getItem("profileTagline") ||
+        $("profileTagline").textContent ||
+        "Build on trust, Driven by Results";
+
+    const tagline = prompt(
+        "Enter tagline:",
+        current
+    );
+
+    if(tagline === null) return;
+
+    const cleanTagline = tagline.trim();
+
+    if(!cleanTagline) return;
+
+    $("profileTagline").textContent = cleanTagline;
+
+    localStorage.setItem(
+        "profileTagline",
+        cleanTagline
+    );
+
+    queueBackupAutosave();
+    msg("Tagline saved.");
+}
+
+
+/* PROFILE LOGO */
+
+function uploadProfileLogo(event){
+
+    const file = event.target.files[0];
+
+    if(!file) return;
+
+    if(!file.type.startsWith("image/")){
+
+        alert("Please select an image.");
+
+        return;
+    }
+
+    const reader = new FileReader();
+
+    reader.onload = function(e){
+
+        const img = $("profileLogo");
+        const text = $("profileLogoText");
+
+        /* Show uploaded logo */
+
+        img.src = e.target.result;
+
+        img.style.display = "block";
+
+        /* Hide Upload Logo text */
+
+        text.style.display = "none";
+
+        /* Save logo */
+
+        localStorage.setItem(
+            "profileLogo",
+            e.target.result
+        );
+
+        queueBackupAutosave();
+        msg("Logo uploaded.");
+    };
+
+    reader.readAsDataURL(file);
+}
+
+
+/* LOAD SAVED PROFILE */
+
+function loadProfile(){
+
+    const savedName =
+        localStorage.getItem("profileName");
+
+    const savedTagline =
+        localStorage.getItem("profileTagline");
+
+    const savedLogo =
+        localStorage.getItem("profileLogo");
+
+    if(savedName){
+
+        $("profileName").textContent =
+            savedName;
+    }
+    
+    if(savedTagline){
+
+        $("profileTagline").textContent =
+            savedTagline;
+    }
+
+    if(savedLogo){
+
+        $("profileLogo").src =
+            savedLogo;
+
+        $("profileLogo").style.display =
+            "block";
+
+        $("profileLogoText").style.display =
+            "none";
+    }
+}
+
+function render(){
+    const q = $("search").value.toLowerCase();
+    const f = $("filter").value;
+
+    $("tags").innerHTML = "";
+
+    data.forEach((g,i)=>{
+
+        if(q && !((g.name+" "+g.country).toLowerCase().includes(q))){
+            return;
+        }
+
+        if(f && g.country !== f){
+            return;
+        }
+
+        const d = document.createElement("div");
+
+        d.className = "tag";
+
+        d.style.cursor = "pointer";
+
+        d.style.background =
+            g.color ||
+            localStorage.getItem("tagColor") ||
+            "#006b3c";
+
+        d.title = "Click to edit";
+
+        d.ondblclick = () => openEdit(i);
+
+
+        /* GROUP NAME */
+
+        const nameSpan = document.createElement("span");
+
+        nameSpan.className = "tag-name";
+
+        nameSpan.textContent = g.name;
+
+
+        /* MEMBERS */
+
+        let memberSpan = null;
+
+        if(
+            g.members !== null &&
+            g.members !== undefined &&
+            g.members !== "" &&
+            Number(g.members) > 0
+        ){
+
+            memberSpan = document.createElement("span");
+
+            memberSpan.className = "members";
+
+            memberSpan.textContent = fmt(g.members);
+
+        }
+
+
+        /* X BUTTON */
+
+        const x = document.createElement("button");
+
+        x.textContent = "×";
+
+        x.title = "Remove";
+
+        x.onclick = (event) => {
+
+            event.stopPropagation();
+
+            removeGroup(i);
+
+        };
+
+
+        /* ADD SECTIONS */
+
+        d.append(nameSpan);
+
+        if(memberSpan){
+            d.append(memberSpan);
+        }
+
+        d.append(x);
+
+        $("tags").appendChild(d);
+
+    });
+
+    stats();
+}
+
+
+
+
+function addGroup(){
+
+    const name = $("newName").value.trim();
+
+    if(!name){
+        msg("Enter a group name.");
+        return;
+    }
+
+    const memberInput = $("newMembers").value.trim();
+
+    const country =
+        $("newCountry").value.trim() ||
+        $("country").value.trim() ||
+        "USA";
+
+    const newGroup = {
+
+        name: name,
+
+        members:
+            memberInput === ""
+                ? ""
+                : Number(memberInput),
+
+        country: country,
+
+        color:
+            localStorage.getItem("tagColor") ||
+            "#006b3c"
+    };
+
+
+    // Check duplicate group
+    const duplicate = data.some(function(g){
+
+        return (
+            String(g.name).trim().toLowerCase() ===
+            name.toLowerCase()
+        );
+
+    });
+
+
+    // If duplicate exists, show popup
+    if(duplicate){
+
+        duplicatePending = newGroup;
+
+        $("duplicateModal").style.display = "flex";
+
+        return;
+    }
+
+
+    // Normal add
+    data.push(newGroup);
+
+    $("newName").value = "";
+    $("newMembers").value = "";
+    $("newCountry").value = "";
+
+    saveData();
+    render();
+
+    $("newName").focus();
+
+    msg("Group added.");
+}
+
+
+// Enter handling for Add Group + Duplicate popup
+["newName", "newMembers", "newCountry"].forEach(function(id){
+
+    $(id).addEventListener("keydown", function(event){
+
+        if(event.key === "Enter"){
+
+            event.preventDefault();
+            event.stopPropagation();
+
+            // If duplicate popup is already open,
+            // Enter means ADD
+            if($("duplicateModal").style.display === "flex"){
+
+                addDuplicate();
+
+                return;
+            }
+
+            // Otherwise try to add the group
+            addGroup();
+        }
+
+    });
+
+});
+
+
+function addDuplicate(){
+
+    if(!duplicatePending){
+        return;
+    }
+
+    data.push(duplicatePending);
+
+    duplicatePending = null;
+
+    $("duplicateModal").style.display = "none";
+
+    $("newName").value = "";
+    $("newMembers").value = "";
+    $("newCountry").value = "";
+
+    saveData();
+    render();
+
+    $("newName").focus();
+
+    msg("Duplicate group added.");
+}
+
+
+function skipDuplicate(){
+
+    duplicatePending = null;
+
+    $("duplicateModal").style.display = "none";
+
+    $("newName").value = "";
+    $("newMembers").value = "";
+    $("newCountry").value = "";
+
+    $("newName").focus();
+
+    msg("Duplicate group skipped.");
+}
+
+
+function removeGroup(i){
+
+    if(i < 0 || i >= data.length){
+        return;
+    }
+
+    // Save deleted group + original position
+    deletedGroups.push({
+        group: data[i],
+        index: i
+    });
+
+    // Remove group
+    data.splice(i, 1);
+
+    saveData();
+    render();
+
+    // Show Undo button
+    $("undoBtn").style.display = "inline-block";
+
+    msg("Group deleted. Click Undo to restore.");
+}
+
+
+function undoDelete(){
+
+    // Nothing to restore
+    if(deletedGroups.length === 0){
+        $("undoBtn").style.display = "none";
+        return;
+    }
+
+    // Get the most recent deleted action
+    const lastDeleted = deletedGroups.pop();
+
+    // If the last action was Clear List
+    if(lastDeleted.type === "clear"){
+
+        // Restore the complete list
+        data = [...lastDeleted.groups];
+
+        saveData();
+        render();
+
+        msg("All groups restored.");
+
+    }else{
+
+        // Normal single-group delete
+        data.splice(
+            lastDeleted.index,
+            0,
+            lastDeleted.group
+        );
+
+        saveData();
+        render();
+
+        msg("Group restored.");
+    }
+
+    // Hide Undo button when nothing is left to undo
+    if(deletedGroups.length === 0){
+        $("undoBtn").style.display = "none";
+    }else{
+        $("undoBtn").style.display = "inline-block";
+    }
+}
+
+function toggleColorPalette(){
+
+    const palette = $("colorPalette");
+
+    if(palette.style.display === "grid"){
+        palette.style.display = "none";
+    }else{
+
+        palette.style.display = "grid";
+
+        updateSelectedColor();
+    }
+}
+
+
+function selectTagColor(color){
+
+    if(!color){
+        return;
+    }
+
+    // Make sure color is stored in lowercase HEX
+    color = color.toLowerCase();
+
+    // Apply color to all groups
+    changeAllTagColors(color);
+
+    // Save selected color
+    localStorage.setItem("tagColor", color);
+
+    // Update palette selection
+    updateSelectedColor();
+
+    // Also update custom color input
+    $("customTagColor").value = color;
+
+    // Close palette
+    $("colorPalette").style.display = "none";
+}
+
+function updateSelectedColor(){
+
+    const currentColor =
+        localStorage.getItem("tagColor") ||
+        "#006b3c";
+
+    // Predefined colors ka selected state
+    document.querySelectorAll(".color-option").forEach(function(button){
+
+        if(
+            button.dataset.color.toLowerCase() ===
+            currentColor.toLowerCase()
+        ){
+
+            button.classList.add("selected");
+
+        }else{
+
+            button.classList.remove("selected");
+
+        }
+
+    });
+
+    // Custom color picker ko saved color do
+    const customColor = $("customTagColor");
+
+    if(customColor){
+        customColor.value = currentColor;
+    }
+}
+
+document.addEventListener("click", function(event){
+
+    // Main Tag Color palette
+    const wrapper =
+        document.querySelector(".color-picker-wrap");
+
+    if(
+        wrapper &&
+        !wrapper.contains(event.target)
+    ){
+
+        $("colorPalette").style.display = "none";
+
+    }
+
+
+    // Individual Edit Color palette
+    const editWrapper =
+        document.querySelector(".edit-color-picker");
+
+    if(
+        editWrapper &&
+        !editWrapper.contains(event.target)
+    ){
+
+        $("editColorPalette").style.display = "none";
+
+    }
+
+});
+
+function changeAllTagColors(color){
+
+    if(!color){
+        return;
+    }
+
+    localStorage.setItem("tagColor", color);
+
+    data.forEach(function(g){
+
+        g.color = color;
+
+    });
+
+    saveData();
+
+    render();
+
+    msg("All tag colors changed.");
+}
+
+function openEdit(i){
+
+    editIndex = i;
+
+    $("eName").value = data[i].name || "";
+    $("eCountry").value = data[i].country || "";
+    $("eMembers").value = data[i].members ?? "";
+
+    const currentColor =
+        data[i].color ||
+        localStorage.getItem("tagColor") ||
+        "#006b3c";
+
+    // Save current editing color temporarily
+    $("modal").dataset.editColor = currentColor;
+
+    $("modal").style.display = "flex";
+
+    updateEditColorPalette();
+}
+
+function toggleEditColorPalette(){
+
+    const palette = $("editColorPalette");
+
+    if(palette.style.display === "grid"){
+
+        palette.style.display = "none";
+
+    }else{
+
+        palette.style.display = "grid";
+
+        updateEditColorPalette();
+    }
+}
+
+
+function selectEditTagColor(color){
+
+    if(!color || editIndex < 0){
+        return;
+    }
+
+    color = color.toLowerCase();
+
+    // Temporarily store selected color
+    $("modal").dataset.editColor = color;
+
+    // Apply immediately to current group
+    data[editIndex].color = color;
+
+    saveData();
+    render();
+
+    // Update selected indicator
+    updateEditColorPalette();
+
+    // Close palette
+    $("editColorPalette").style.display = "none";
+
+    msg("Group color changed.");
+}
+
+
+function updateEditColorPalette(){
+
+    const currentColor =
+        $("modal").dataset.editColor ||
+        "#006b3c";
+
+    document.querySelectorAll(".edit-color-option")
+        .forEach(function(button){
+
+            if(
+                button.dataset.color.toLowerCase() ===
+                currentColor.toLowerCase()
+            ){
+
+                button.classList.add("selected");
+
+            }else{
+
+                button.classList.remove("selected");
+
+            }
+
+        });
+
+
+    // Keep custom color picker synchronized
+    const customColor =
+        $("editCustomColor");
+
+    if(customColor){
+
+        customColor.value = currentColor;
+
+    }
+}
+
+
+function closeEditColorPalette(){
+
+    const palette =
+        $("editColorPalette");
+
+    if(palette){
+
+        palette.style.display = "none";
+
+    }
+}
+
+function closeEdit(){
+
+    $("editColorPalette").style.display = "none";
+
+    $("modal").style.display = "none";
+
+    $("modal").dataset.editColor = "";
+
+    editIndex = -1;
+}
+
+function applyEdit(){
+
+    if(editIndex < 0){
+        return;
+    }
+
+    const memberInput = $("eMembers").value.trim();
+
+    data[editIndex].name =
+        $("eName").value.trim() ||
+        data[editIndex].name;
+
+    data[editIndex].country =
+        $("eCountry").value.trim() ||
+        "USA";
+
+    data[editIndex].members =
+        memberInput === ""
+            ? ""
+            : Number(memberInput);
+
+    data[editIndex].color =
+        $("modal").dataset.editColor ||
+        data[editIndex].color ||
+        localStorage.getItem("tagColor") ||
+        "#006b3c";
+
+    saveData();
+    render();
+    closeEdit();
+
+    msg("Group updated.");
+}
+
+document.addEventListener("keydown", function(event){
+
+    if(
+        event.key === "Enter" &&
+        $("modal").style.display === "flex" &&
+        editIndex >= 0
+    ){
+
+        event.preventDefault();
+        event.stopPropagation();
+
+        applyEdit();
+    }
+
+});
+
+
+function saveDefaultCountry(){localStorage.setItem("defaultCountry",$("country").value.trim()||"USA");queueBackupAutosave();msg("Default country saved.")}
+function saveListTitle(){
+
+    const title = $("listTitle").value.trim();
+
+    if(!title) return;
+
+    localStorage.setItem("listTitle", title);
+    queueBackupAutosave();
+
+    msg("List title saved.");
+}
+function clearAll(){
+
+    if(!data.length){
+        msg("List is already empty.");
+        return;
+    }
+
+    if(confirm("Clear all groups?")){
+
+        // Save complete list for Undo
+        deletedGroups.push({
+            type: "clear",
+            groups: [...data]
+        });
+
+        // Clear list
+        data = [];
+
+        saveData();
+        render();
+
+        // Show Undo button
+        $("undoBtn").style.display = "inline-block";
+
+        msg("All groups cleared. Click Undo to restore.");
+    }
+}
+function saveList(){saveData();msg("List saved in this browser.")}
+
+async function downloadList(){
+
+    if(!data.length){
+        alert("There is no group list to download.");
+        return;
+    }
+
+    const area = $("downloadArea");
+
+    if(!area){
+        alert("Download area not found.");
+        return;
+    }
+
+    try{
+
+        /* Create a temporary copy for downloading */
+        const clone = area.cloneNode(true);
+
+        /* Convert title INPUT into normal text */
+        const originalTitle = clone.querySelector("#listTitle");
+
+        if(originalTitle){
+
+            const titleBox = document.createElement("div");
+
+            titleBox.textContent = originalTitle.value;
+
+            titleBox.style.display = "block";
+            titleBox.style.width = "100%";
+            titleBox.style.textAlign = "center";
+            titleBox.style.fontFamily = '"Segoe UI", Arial, sans-serif';
+            titleBox.style.fontSize = "30px";
+            titleBox.style.fontWeight = "700";
+            titleBox.style.letterSpacing = "0.4px";
+            titleBox.style.color = "#1f2937";
+            titleBox.style.margin = "5px 0 16px";
+            titleBox.style.lineHeight = "1.2";
+            titleBox.style.padding = "0";
+            titleBox.style.height = "36px";
+            titleBox.style.boxSizing = "border-box";
+
+            originalTitle.replaceWith(titleBox);
+        }
+
+        /* Put clone outside the visible page */
+        clone.style.position = "absolute";
+        clone.style.left = "-100000px";
+        clone.style.top = "0";
+        clone.style.width = area.offsetWidth + "px";
+        clone.style.background = "#fff";
+        clone.style.margin = "0";
+        clone.style.padding = "0";
+
+        document.body.appendChild(clone);
+
+        /* Allow browser to render the clone */
+        await new Promise(function(resolve){
+            requestAnimationFrame(function(){
+                requestAnimationFrame(resolve);
+            });
+        });
+
+        const canvas = await html2canvas(clone, {
+
+            scale: 3,
+
+            backgroundColor: "#ffffff",
+
+            useCORS: true,
+
+            allowTaint: false,
+
+            logging: false,
+
+            imageTimeout: 0,
+
+            scrollX: 0,
+
+            scrollY: 0,
+
+            width: clone.offsetWidth,
+
+            height: clone.scrollHeight,
+
+            windowWidth: clone.offsetWidth,
+
+            windowHeight: clone.scrollHeight
+        });
+
+        /* Remove temporary clone */
+        document.body.removeChild(clone);
+
+        const link = document.createElement("a");
+
+        const date = new Date();
+
+        const fileName =
+            "Groups-List-" +
+            date.getFullYear() + "-" +
+            String(date.getMonth()+1).padStart(2,"0") + "-" +
+            String(date.getDate()).padStart(2,"0") +
+            ".png";
+
+        link.download = fileName;
+
+        link.href = canvas.toDataURL(
+            "image/png",
+            1.0
+        );
+
+        document.body.appendChild(link);
+
+        link.click();
+
+        document.body.removeChild(link);
+
+        msg("HD list image downloaded.");
+
+    }catch(error){
+
+        console.error(error);
+
+        alert(
+            "Image download failed. Please try again."
+        );
+    }
+}
+function msg(t){$("status").textContent=t;setTimeout(()=>$("status").textContent="",2000)}
+const dc=localStorage.getItem("defaultCountry");
+if(dc)$("country").value=dc;
+
+const savedTitle = localStorage.getItem("listTitle");
+
+if(savedTitle){
+    $("listTitle").value = savedTitle;
+}
+
+loadProfile();
+
+render();
+
+updateSelectedColor();
+resizeCountryInput();
+
+/* Load per-user cloud backups after the existing Tags UI is ready. */
+loadBackups();
+</script>
+</body>
+</html>
