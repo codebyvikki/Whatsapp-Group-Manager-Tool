@@ -1008,6 +1008,9 @@ let tagBackups = [];
 let activeBackupName = '';
 let backupReady = false;
 let backupAutosaveTimer = null;
+let currentUserId = '';
+const LOCAL_SAVE_PREFIX = 'tagsBrowserSaved::';
+const LOCAL_BACKUP_NAME = '__browser_saved__';
 
 const apiJSON = async function(url, options){
     const response = await fetch(url, Object.assign({
@@ -1080,15 +1083,65 @@ function applyTagSnapshot(snapshot){
     return true;
 }
 
+function getLocalSaveKey(){
+    return currentUserId ? LOCAL_SAVE_PREFIX + String(currentUserId) : '';
+}
+
+function readLocalSavedList(){
+    const key=getLocalSaveKey();
+    if(!key) return null;
+    try{
+        const raw=localStorage.getItem(key);
+        if(!raw) return null;
+        const parsed=JSON.parse(raw);
+        return parsed && parsed.snapshot ? parsed : null;
+    }catch(e){
+        console.error('[tags-local-save] read:', e);
+        return null;
+    }
+}
+
+function writeLocalSavedList(snapshot){
+    const key=getLocalSaveKey();
+    if(!key) throw new Error('Please log in before saving this list.');
+    const record={
+        name: LOCAL_BACKUP_NAME,
+        updatedAt: Date.now(),
+        snapshot: snapshot
+    };
+    try{
+        localStorage.setItem(key, JSON.stringify(record));
+        return record;
+    }catch(e){
+        console.error('[tags-local-save] write:', e);
+        throw new Error('Browser storage is full. Please remove some old saved browser data and try again.');
+    }
+}
+
+function deleteLocalSavedList(){
+    const key=getLocalSaveKey();
+    if(key) localStorage.removeItem(key);
+}
+
 function renderBackupOptions(){
     const select = $('savedTagList');
     if(!select) return;
     select.innerHTML = '';
-    if(!tagBackups.length){
+
+    const local=readLocalSavedList();
+    if(local){
+        const o=document.createElement('option');
+        o.value=LOCAL_BACKUP_NAME;
+        o.textContent='💻 Browser Saved List (Offline) · ' + new Date(local.updatedAt).toLocaleString();
+        select.appendChild(o);
+    }
+
+    if(!tagBackups.length && !local){
         const o=document.createElement('option');
         o.value=''; o.textContent='No saved lists'; select.appendChild(o);
         return;
     }
+
     tagBackups.forEach(function(b){
         const o=document.createElement('option');
         o.value=b.name;
@@ -1096,25 +1149,56 @@ function renderBackupOptions(){
         o.textContent=b.name + (d ? ' · ' + d : '');
         select.appendChild(o);
     });
+
     if(activeBackupName && tagBackups.some(b=>b.name===activeBackupName)){
         select.value=activeBackupName;
+    }else if(local){
+        select.value=LOCAL_BACKUP_NAME;
+    }
+}
+
+async function getCurrentUserForTags(){
+    try{
+        const me=await apiJSON('/api/me');
+        if(me?.loggedIn && me.user?.id){
+            currentUserId=String(me.user.id);
+            localStorage.setItem('tagsLastUserId', currentUserId);
+            return currentUserId;
+        }
+        currentUserId='';
+        return '';
+    }catch(e){
+        // Offline fallback: use the last profile ID only for browser-local data.
+        currentUserId=localStorage.getItem('tagsLastUserId') || '';
+        return currentUserId;
     }
 }
 
 async function loadBackups(){
+    currentUserId=await getCurrentUserForTags();
+    if(!currentUserId){
+        $('backupStatus').textContent='Login required';
+        renderBackupOptions();
+        return;
+    }
+
     try{
-        const me = await apiJSON('/api/me');
-        if(!me.loggedIn){ location.href='/'; return; }
         const result = await apiJSON('/api/tag-backups', { method:'GET' });
         tagBackups = Array.isArray(result.backups) ? result.backups : [];
-        renderBackupOptions();
         backupReady = true;
+        renderBackupOptions();
         $('backupStatus').textContent = tagBackups.length
-            ? `${tagBackups.length} saved list${tagBackups.length===1?'':'s'}`
-            : 'No cloud backups yet';
+            ? `${tagBackups.length} saved list${tagBackups.length===1?'':'s'} · browser copy available offline`
+            : (readLocalSavedList() ? 'Browser saved copy available offline' : 'No saved lists yet');
     }catch(e){
         console.error('[tag-backups]', e);
-        $('backupStatus').textContent = e.status===401 ? 'Login required' : 'Backup server unavailable';
+        // Do not lose the user's backup just because the cloud endpoint is unavailable.
+        tagBackups=[];
+        backupReady=true;
+        renderBackupOptions();
+        $('backupStatus').textContent = readLocalSavedList()
+            ? 'Cloud backup unavailable · browser copy is available offline'
+            : 'Cloud backup unavailable · Save List will use browser storage';
     }
 }
 
@@ -1132,27 +1216,58 @@ async function saveBackup(){
 }
 
 async function saveBackupWithName(name){
+    if(!currentUserId) currentUserId=await getCurrentUserForTags();
+    if(!currentUserId){
+        alert('Please log in to save a Tags List backup.');
+        return;
+    }
+
+    const snapshot=buildTagSnapshot();
     try{
         const result=await apiJSON('/api/tag-backups',{
             method:'POST',
-            body:JSON.stringify({name, snapshot:buildTagSnapshot()})
+            body:JSON.stringify({name, snapshot:snapshot})
         });
         tagBackups=Array.isArray(result.backups)?result.backups:[];
         activeBackupName=name;
         renderBackupOptions();
-        $('backupStatus').textContent='Saved securely to your account';
+        $('backupStatus').textContent='Saved to your account + browser offline copy';
+        // Keep a local emergency copy of the currently active backup too.
+        try{ writeLocalSavedList(snapshot); }catch(localError){ console.warn(localError); }
     }catch(e){
-        alert(e.message || 'Could not save backup.');
+        // A 404 usually means the running server is an older build. Save locally so
+        // the user's list is still protected instead of showing a failed-save state.
+        try{
+            writeLocalSavedList(snapshot);
+            activeBackupName='';
+            renderBackupOptions();
+            $('backupStatus').textContent='Server backup unavailable · saved in browser offline';
+            alert('Server backup endpoint is unavailable, so the list was saved safely in this browser instead. It will remain available for this profile.');
+        }catch(localError){
+            alert(e.message || localError.message || 'Could not save backup.');
+        }
     }
 }
 
 async function loadSelectedBackup(){
     const name=$('savedTagList')?.value || '';
+    if(name===LOCAL_BACKUP_NAME){
+        const local=readLocalSavedList();
+        if(!local) return;
+        if(!confirm('Load your browser-saved Tags List? Your current unsaved changes will be replaced.')) return;
+        if(applyTagSnapshot(local.snapshot)){
+            activeBackupName='';
+            $('backupStatus').textContent='Loaded from browser storage (offline available)';
+            renderBackupOptions();
+        }
+        return;
+    }
     const backup=tagBackups.find(b=>b.name===name);
     if(!backup) return;
     if(!confirm(`Load saved Tags List "${name}"? Your current unsaved changes will be replaced.`)) return;
     if(applyTagSnapshot(backup.snapshot)){
         activeBackupName=name;
+        try{ writeLocalSavedList(backup.snapshot); }catch(e){ console.warn(e); }
         $('backupStatus').textContent='Loaded from your account';
         renderBackupOptions();
     }
@@ -1161,6 +1276,13 @@ async function loadSelectedBackup(){
 async function deleteSelectedBackup(){
     const name=$('savedTagList')?.value || '';
     if(!name) return;
+    if(name===LOCAL_BACKUP_NAME){
+        if(!confirm('Delete the browser-saved offline copy?')) return;
+        deleteLocalSavedList();
+        renderBackupOptions();
+        $('backupStatus').textContent='Browser offline copy deleted';
+        return;
+    }
     if(!confirm(`Delete saved Tags List "${name}"? This cannot be undone.`)) return;
     try{
         const result=await apiJSON('/api/tag-backups/delete',{
@@ -1172,15 +1294,19 @@ async function deleteSelectedBackup(){
         renderBackupOptions();
         $('backupStatus').textContent='Backup deleted';
     }catch(e){
+        // If the server copy cannot be reached, don't pretend it was deleted remotely.
         alert(e.message || 'Could not delete backup.');
     }
 }
 
 function queueBackupAutosave(){
-    if(!backupReady || !activeBackupName) return;
+    if(!backupReady || !currentUserId) return;
     clearTimeout(backupAutosaveTimer);
     backupAutosaveTimer=setTimeout(function(){
-        saveBackupWithName(activeBackupName).catch(function(){});
+        try{ writeLocalSavedList(buildTagSnapshot()); }catch(e){ console.warn('[tags-local-save]',e); }
+        if(activeBackupName){
+            saveBackupWithName(activeBackupName).catch(function(){});
+        }
     },1200);
 }
 
@@ -2016,7 +2142,21 @@ function clearAll(){
         msg("All groups cleared. Click Undo to restore.");
     }
 }
-function saveList(){saveData();msg("List saved in this browser.")}
+async function saveList(){
+    if(!currentUserId) currentUserId=await getCurrentUserForTags();
+    if(!currentUserId){
+        alert('Please log in before saving this list.');
+        return;
+    }
+    try{
+        writeLocalSavedList(buildTagSnapshot());
+        renderBackupOptions();
+        $('backupStatus').textContent='Browser saved · available offline for this profile';
+        msg('List saved in this browser for your profile.');
+    }catch(e){
+        alert(e.message || 'Could not save this list in the browser.');
+    }
+}
 
 async function downloadList(){
 

@@ -183,6 +183,7 @@ async function getDb() {
       await Promise.all([
         db.collection('users').createIndex({ usernameKey: 1 }, { unique: true }),
         db.collection('lists').createIndex({ userId: 1, name: 1 }, { unique: true }),
+        db.collection('tagBackups').createIndex({ userId: 1, name: 1 }, { unique: true }),
         db.collection('sessions').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
         db.collection('bulkJobs').createIndex({ userId: 1, type: 1, state: 1, updatedAt: -1 }),
         db.collection('bulkJobs').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 })
@@ -218,6 +219,7 @@ let appData = {
   codes: {},
   codesByUser: {},
   listsByUser: {},
+  tagBackupsByUser: {},
   creatorDailyByUser: {},
   creatorHistoryByUser: {}
 };
@@ -231,6 +233,7 @@ async function loadData() {
         codes: doc?.codes || {},
         codesByUser: doc?.codesByUser || {},
         listsByUser: doc?.listsByUser || {},
+        tagBackupsByUser: doc?.tagBackupsByUser || {},
         creatorDailyByUser: doc?.creatorDailyByUser || {},
         creatorHistoryByUser: doc?.creatorHistoryByUser || {}
       };
@@ -242,6 +245,7 @@ async function loadData() {
         codes: j.codes || {},
         codesByUser: j.codesByUser || {},
         listsByUser: j.listsByUser || {},
+        tagBackupsByUser: j.tagBackupsByUser || {},
         creatorDailyByUser: j.creatorDailyByUser || {},
         creatorHistoryByUser: j.creatorHistoryByUser || {}
       };
@@ -249,7 +253,7 @@ async function loadData() {
     }
   } catch (e) {
     console.error('[storage] loadData:', e.message);
-    appData = { codes: {}, codesByUser: {}, listsByUser: {}, creatorDailyByUser: {}, creatorHistoryByUser: {}, _legacyLists: [] };
+    appData = { codes: {}, codesByUser: {}, listsByUser: {}, tagBackupsByUser: {}, creatorDailyByUser: {}, creatorHistoryByUser: {}, _legacyLists: [] };
   }
 }
 
@@ -259,6 +263,7 @@ async function saveData() {
     codes: appData.codes || {},
     codesByUser: appData.codesByUser || {},
     listsByUser: appData.listsByUser || {},
+    tagBackupsByUser: appData.tagBackupsByUser || {},
     creatorDailyByUser: appData.creatorDailyByUser || {},
     creatorHistoryByUser: appData.creatorHistoryByUser || {}
   };
@@ -390,11 +395,15 @@ async function deleteUser(id) {
   if (d) {
     await d.collection('users').deleteOne({ _id: id, role: 'user' });
     await d.collection('lists').deleteMany({ userId: id });
+    await d.collection('tagBackups').deleteMany({ userId: id });
     return;
   }
 
   const users = readJson(USERS_FILE, []);
   writeJsonAtomic(USERS_FILE, users.filter((u) => !(u._id === id && u.role === 'user')));
+  appData.tagBackupsByUser = appData.tagBackupsByUser || {};
+  delete appData.tagBackupsByUser[id];
+  await saveData();
 }
 
 async function saveUserLists(userId, lists) {
@@ -3380,6 +3389,121 @@ app.post('/api/lists/delete', requireAuth, async (req, res) => {
 
   await saveUserLists(req.user.userId, lists);
   res.json({ lists });
+});
+
+/* ---------- Per-user saved Tags List backups ---------- */
+
+function cleanTagBackup(value) {
+  const snapshot = value?.snapshot && typeof value.snapshot === 'object'
+    ? value.snapshot
+    : {};
+
+  const groups = Array.isArray(snapshot.groups)
+    ? snapshot.groups.slice(0, 500).map((g) => ({
+        name: String(g?.name || '').slice(0, 500),
+        members: Number.isFinite(Number(g?.members)) ? Math.max(0, Number(g.members)) : 0,
+        country: String(g?.country || '').slice(0, 100),
+        color: String(g?.color || '').slice(0, 32)
+      }))
+    : [];
+
+  return {
+    version: 1,
+    groups,
+    listTitle: String(snapshot.listTitle || 'VALID LIST').slice(0, 200),
+    country: String(snapshot.country || '').slice(0, 100),
+    profileName: String(snapshot.profileName || '').slice(0, 300),
+    profileTagline: String(snapshot.profileTagline || '').slice(0, 500),
+    profileLogo: typeof snapshot.profileLogo === 'string' && snapshot.profileLogo.length <= 2_500_000
+      ? snapshot.profileLogo
+      : '',
+    tagColor: String(snapshot.tagColor || '#006b3c').slice(0, 32),
+    savedAt: Date.now()
+  };
+}
+
+async function getUserTagBackups(userId) {
+  const uid = String(userId);
+  const d = await getDb();
+  if (d) {
+    return d.collection('tagBackups')
+      .find({ userId: uid }, { projection: { _id: 0, userId: 0 } })
+      .sort({ updatedAt: -1, name: 1 })
+      .toArray();
+  }
+  return Array.isArray(appData.tagBackupsByUser?.[uid])
+    ? [...appData.tagBackupsByUser[uid]].sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))
+    : [];
+}
+
+async function saveUserTagBackup(userId, name, snapshot) {
+  const uid = String(userId);
+  const cleanName = String(name || '').trim();
+  if (!cleanName || cleanName.length > 80) throw new Error('Backup name must be 1-80 characters.');
+
+  const cleanSnapshot = cleanTagBackup({ snapshot });
+  const now = Date.now();
+  const record = { userId: uid, name: cleanName, snapshot: cleanSnapshot, updatedAt: now };
+  const d = await getDb();
+
+  if (d) {
+    await d.collection('tagBackups').replaceOne(
+      { userId: uid, name: cleanName },
+      record,
+      { upsert: true }
+    );
+  } else {
+    if (!appData.tagBackupsByUser[uid]) appData.tagBackupsByUser[uid] = [];
+    const list = appData.tagBackupsByUser[uid];
+    const i = list.findIndex((x) => x.name === cleanName);
+    if (i >= 0) list[i] = record;
+    else list.push(record);
+    await saveData();
+  }
+  return record;
+}
+
+async function deleteUserTagBackup(userId, name) {
+  const uid = String(userId);
+  const cleanName = String(name || '');
+  const d = await getDb();
+  if (d) {
+    await d.collection('tagBackups').deleteOne({ userId: uid, name: cleanName });
+  } else {
+    appData.tagBackupsByUser[uid] = (appData.tagBackupsByUser[uid] || []).filter((x) => x.name !== cleanName);
+    await saveData();
+  }
+}
+
+app.get('/api/tag-backups', requireAuth, async (req, res) => {
+  try {
+    res.json({ backups: await getUserTagBackups(req.user.userId) });
+  } catch (e) {
+    res.status(500).json({ error: 'Could not load saved Tags Lists' });
+  }
+});
+
+app.post('/api/tag-backups', requireAuth, async (req, res) => {
+  try {
+    const name = String(req.body?.name || '').trim();
+    if (!name || name.length > 80) return res.status(400).json({ error: 'Enter a backup name (1-80 characters).' });
+    const snapshot = req.body?.snapshot;
+    if (!snapshot || !Array.isArray(snapshot.groups)) return res.status(400).json({ error: 'Invalid Tags List backup.' });
+    const record = await saveUserTagBackup(req.user.userId, name, snapshot);
+    res.json({ ok: true, backup: record, backups: await getUserTagBackups(req.user.userId) });
+  } catch (e) {
+    res.status(400).json({ error: e.message || 'Could not save Tags List backup' });
+  }
+});
+
+app.post('/api/tag-backups/delete', requireAuth, async (req, res) => {
+  try {
+    const name = String(req.body?.name || '');
+    await deleteUserTagBackup(req.user.userId, name);
+    res.json({ ok: true, backups: await getUserTagBackups(req.user.userId) });
+  } catch (e) {
+    res.status(500).json({ error: 'Could not delete Tags List backup' });
+  }
 });
 
 /* ---------- WhatsApp disconnect: CURRENT USER ONLY ---------- */
