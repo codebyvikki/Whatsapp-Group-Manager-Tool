@@ -1112,7 +1112,7 @@
     }
   }
 
-</style>
+.cancel-operation{border-color:#e7b7b1!important;background:#fff!important;color:var(--danger)!important}.cancel-operation:hover:not(:disabled){background:var(--danger-soft)!important;box-shadow:none!important}</style>
 </head>
 <body>
 <main>
@@ -1495,38 +1495,30 @@
 
 const $ = (id) => document.getElementById(id);
 
+const apiWait = ms => new Promise(resolve => setTimeout(resolve, ms));
+
 const api = async (url, body, options = {}) => {
-
-  const requestOptions = {
-    credentials: 'same-origin',
-    ...options
-  };
-
+  const requestOptions = { credentials: 'same-origin', ...options };
   if (body !== undefined) {
     requestOptions.method = options.method || 'POST';
-    requestOptions.headers = {
-      'Content-Type': 'application/json',
-      ...(options.headers || {})
-    };
+    requestOptions.headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
     requestOptions.body = JSON.stringify(body);
   }
-
-  const r = await fetch(url, requestOptions);
-
-  const j = await r.json().catch(() => ({}));
-
-  if (!r.ok) {
-    throw Object.assign(
-      new Error(j.error || 'An error occurred'),
-      {
-        status: r.status
-      }
-    );
+  let lastError;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      const r = await fetch(url, requestOptions);
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw Object.assign(new Error(j.error || 'Request failed'), { status: r.status });
+      return j;
+    } catch (e) {
+      lastError = e;
+      if (e?.status && ![502, 503, 504].includes(e.status)) throw e;
+      if (attempt < 3) await apiWait(500 * (attempt + 1));
+    }
   }
-
-  return j;
+  throw lastError || new Error('Network request failed');
 };
-
 
 
 const esc = (s) =>
@@ -1564,53 +1556,30 @@ let waStatusTimer = null;
 function updateWaStatus(state) {
   const status = $('waStatus');
   const text = $('waText');
-
   if (!status || !text) return;
-
-  if (state === 'connected') {
-    status.className = 'status live';
-    text.textContent = 'Connected';
-    return;
-  }
-
-  status.className = 'status disconnected';
-  text.textContent = 'Disconnected';
+  const connectedNow = state === 'connected';
+  status.className = 'status ' + (connectedNow ? 'live' : 'disconnected');
+  text.textContent = connectedNow ? 'Connected' : 'Disconnected';
 }
 
-async function refreshWaStatus() {
+async function refreshWa() {
   try {
     const s = await api('/api/status');
-
-    updateWaStatus(
-      s && s.state === 'connected'
-        ? 'connected'
-        : 'disconnected'
-    );
+    const connectedNow = s?.state === 'connected' || s?.connected === true;
+    updateWaStatus(connectedNow ? 'connected' : 'disconnected');
   } catch {
-    updateWaStatus('disconnected');
+    // A temporary status request failure is not a WhatsApp disconnect.
+    // Keep the last known status exactly like the other working tools.
   }
 }
 
 function startWaStatusMonitor() {
-  refreshWaStatus();
-
-  if (waStatusTimer) {
-    clearInterval(waStatusTimer);
-  }
-
-  waStatusTimer = setInterval(
-    refreshWaStatus,
-    2500
-  );
+  refreshWa();
+  clearInterval(waStatusTimer);
+  waStatusTimer = setInterval(refreshWa, 2500);
 }
 
-
-/* =========================================================
-   DASHBOARD SESSION GATE
-   Authentication/QR is handled by dashboard.html.
-   The Link Organizer keeps its existing API/tool behavior.
-========================================================= */
-async function requireConnectedSession(){
+async function requireConnectedSession() {
   try {
     const me = await api('/api/me');
     if (!me.loggedIn) {
@@ -1619,17 +1588,21 @@ async function requireConnectedSession(){
     }
 
     const s = await api('/api/status');
-    if (s.state !== 'connected') {
+    const connectedNow = s?.state === 'connected' || s?.connected === true;
+    if (!connectedNow) {
+      updateWaStatus('disconnected');
       location.replace('/dashboard.html');
       return false;
     }
 
+    updateWaStatus('connected');
     return true;
   } catch {
     location.replace('/dashboard.html');
     return false;
   }
 }
+
 
 /* =========================================================
    TABS
@@ -1886,6 +1859,8 @@ function render() {
 }
 
 
+let activeLinkJobId = null;
+
 async function run(
   btn,
   payload,
@@ -1929,6 +1904,8 @@ async function run(
       );
 
 
+    activeLinkJobId = jobId;
+    $('cancelLinkJob').hidden = false;
     let j;
 
 
@@ -1948,8 +1925,7 @@ async function run(
           : 100;
 
 
-      $('progress').textContent =
-        `Processing links: ${j.done}/${j.total}`;
+      $('progress').textContent = j.cancelled ? `Cancelled: ${j.done}/${j.total} processed.` : `Processing links: ${j.done}/${j.total}`;
 
 
       if (retryMode) {
@@ -1979,7 +1955,7 @@ async function run(
       }
 
 
-    } while (!j.finished);
+    } while (!j.finished && !j.cancelled);
 
 
     if (j.error) {
@@ -2013,9 +1989,21 @@ async function run(
 
 
   $('bar').hidden = true;
+  $('cancelLinkJob').hidden = true;
+  $('cancelLinkJob').disabled = false;
+  activeLinkJobId = null;
   btn.disabled = false;
 }
 
+
+$('cancelLinkJob').onclick = async () => {
+  if (!activeLinkJobId || !confirm('Cancel this operation? Links already generated cannot be undone.')) return;
+  try {
+    $('cancelLinkJob').disabled = true;
+    await api('/api/job/' + encodeURIComponent(activeLinkJobId) + '/cancel', { method:'POST', body:'{}' });
+    $('progress').textContent = 'Cancellation requested…';
+  } catch (e) { $('err').textContent = e.message; $('cancelLinkJob').disabled = false; }
+};
 
 $('retryFailed').onclick = () => {
 

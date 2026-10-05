@@ -48,6 +48,12 @@ const DESCRIPTION_JOB_TTL_MS = 30 * 60 * 1000;
 const dpImages = new Map();
 const dpJobs = new Map();
 const descriptionJobs = new Map();
+const memberRemovalJobs = new Map();
+const MEMBER_REMOVER_MAX_GROUPS = Math.max(1, Number(process.env.MEMBER_REMOVER_MAX_GROUPS || 200));
+const MEMBER_REMOVER_MAX_MEMBERS = Math.max(1, Number(process.env.MEMBER_REMOVER_MAX_MEMBERS || 500));
+const MEMBER_REMOVER_GAP_MS = Math.max(700, Number(process.env.MEMBER_REMOVER_GAP_MS || 900));
+const MEMBER_REMOVER_REQUEST_TIMEOUT_MS = Math.max(10000, Number(process.env.MEMBER_REMOVER_REQUEST_TIMEOUT_MS || 30000));
+const MEMBER_REMOVER_RETRY_LIMIT = Math.max(0, Math.min(3, Number(process.env.MEMBER_REMOVER_RETRY_LIMIT || 2)));
 const activeBulkJobs = new Set();
 let permissionNextAllowedAt = 0;
 let permissionCooldownUntil = 0;
@@ -1261,12 +1267,25 @@ app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
 /* ---------- WhatsApp status ---------- */
 
 app.get('/api/status', requireAuth, async (req, res) => {
+  // Connection status is live state. Never let a browser/proxy cache a
+  // previous disconnected/connecting response and show stale UI.
+  res.set({
+    'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+    'Pragma': 'no-cache',
+    'Expires': '0',
+    'Surrogate-Control': 'no-store'
+  });
+
   const wa = getWA(req.user.userId);
+  const connected = wa.state === 'connected' && !!wa.sock;
+
   res.json({
     state: wa.state,
+    connected,
     qr: wa.qrDataUrl,
     canDisconnect: wa.state !== 'idle',
-    owner: req.user.userId
+    owner: req.user.userId,
+    checkedAt: Date.now()
   });
 });
 
@@ -1363,6 +1382,15 @@ async function persistBulkJob(job, type = job.type || 'dp') {
   }
 }
 
+async function persistMemberRemovalJob(job){
+  try {
+    job.expiresAt = job.expiresAt || (Date.now() + 24 * 60 * 60 * 1000);
+    await persistBulkJob(job, 'member-removal');
+  } catch (e) {
+    console.error('[member-remover] job persistence warning:', e?.message || e);
+  }
+}
+
 async function deleteBulkJob(job, type = job.type || 'dp') {
   const d = await getDb();
   if (d) await d.collection('bulkJobs').deleteOne({ _id: String(job.id), type });
@@ -1370,7 +1398,7 @@ async function deleteBulkJob(job, type = job.type || 'dp') {
 
 async function loadBulkJob(id, userId, type = 'dp') {
   const key = String(id || '');
-  const map = type === 'dp' ? dpJobs : descriptionJobs;
+  const map = type === 'dp' ? dpJobs : type === 'description' ? descriptionJobs : memberRemovalJobs;
   const cached = map.get(key);
   if (cached && String(cached.userId) === String(userId)) return cached;
   const d = await getDb();
@@ -1384,7 +1412,7 @@ async function loadBulkJob(id, userId, type = 'dp') {
 
 async function findActiveBulkJob(userId, type = 'dp') {
   const uid = String(userId);
-  const map = type === 'dp' ? dpJobs : descriptionJobs;
+  const map = type === 'dp' ? dpJobs : type === 'description' ? descriptionJobs : memberRemovalJobs;
   const activeStates = new Set(['queued', 'running', 'paused', 'recoverable']);
   let best = null;
   for (const job of map.values()) {
@@ -1409,7 +1437,7 @@ async function findActiveBulkJob(userId, type = 'dp') {
 
 async function findLatestBulkJob(userId, type = 'dp') {
   const uid = String(userId);
-  const map = type === 'dp' ? dpJobs : descriptionJobs;
+  const map = type === 'dp' ? dpJobs : type === 'description' ? descriptionJobs : memberRemovalJobs;
   let best = null;
   for (const job of map.values()) {
     if (String(job.userId) !== uid) continue;
@@ -1467,6 +1495,7 @@ function dpJobPublic(job) {
     finishedAt: job.finishedAt,
     updatedAt: job.updatedAt || null,
     error: job.error || null,
+    cancelled: !!job.cancelled,
     results: (job.results || []).map((x) => ({ id: x.id, name: x.name, status: x.status, error: x.error || null }))
   };
 }
@@ -1516,6 +1545,7 @@ async function runDpJob(job) {
     await persistBulkJob(job, 'dp');
 
     for (let i = 0; i < job.results.length; i++) {
+      if (job.cancelled) { job.state = 'cancelled'; job.finishedAt = new Date().toISOString(); job.current = null; job.expiresAt = Date.now() + DP_JOB_TTL_MS; await persistBulkJob(job, 'dp'); return; }
       if (wa.state !== 'connected' || !wa.sock) {
         markJobPaused(job, 'WhatsApp disconnected. The job will resume automatically after reconnection.');
         await persistBulkJob(job, 'dp');
@@ -1578,7 +1608,7 @@ async function createDpJob(req, action, ids, imageBuffer = null) {
   if (active) throw new Error(`A DP job is already ${active.state}. Wait for it to finish or reconnect to it.`);
   const all = await getGroups(getWA(req.user.userId), false);
   const results = ids.map((id) => ({ id, name: String(all[id]?.subject || id), status: 'pending', error: null }));
-  const job = { id: `DP-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(2).toString('hex')}`, type: 'dp', userId: String(req.user.userId), action, imageBuffer, results, total: results.length, done: 0, success: 0, failed: 0, current: null, state: 'queued', startedAt: null, finishedAt: null, updatedAt: Date.now(), error: null, createdAt: Date.now(), expiresAt: Date.now() + 24 * 60 * 60 * 1000 };
+  const job = { id: `DP-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(2).toString('hex')}`, type: 'dp', userId: String(req.user.userId), action, imageBuffer, results, total: results.length, done: 0, success: 0, failed: 0, current: null, state: 'queued', cancelled: false, startedAt: null, finishedAt: null, updatedAt: Date.now(), error: null, createdAt: Date.now(), expiresAt: Date.now() + 24 * 60 * 60 * 1000 };
   dpJobs.set(job.id, job);
   await persistBulkJob(job, 'dp');
   runDpJob(job).catch((e) => console.error(`[dp:${job.id}]`, e.message));
@@ -1654,7 +1684,7 @@ function descriptionValidateIds(ids) {
 
 function descriptionJobPublic(job) {
   if (!job) return null;
-  return { id: job.id, action: job.action, state: job.state, total: job.total, done: job.done, success: job.success, failed: job.failed, current: job.current, startedAt: job.startedAt, finishedAt: job.finishedAt, updatedAt: job.updatedAt || null, error: job.error || null, results: (job.results || []).map((x) => ({ id:x.id, name:x.name, status:x.status, error:x.error || null })) };
+  return { id: job.id, action: job.action, state: job.state, total: job.total, done: job.done, success: job.success, failed: job.failed, current: job.current, startedAt: job.startedAt, finishedAt: job.finishedAt, updatedAt: job.updatedAt || null, error: job.error || null, cancelled: !!job.cancelled, results: (job.results || []).map((x) => ({ id:x.id, name:x.name, status:x.status, error:x.error || null })) };
 }
 
 function isDescriptionRateError(e) { return /rate|overlimit|429|too many|throttl|temporar/i.test(descriptionErrorText(e)); }
@@ -1687,6 +1717,7 @@ async function runDescriptionJob(job) {
     job.state = 'running'; job.error = null; job.startedAt ||= new Date().toISOString(); job.expiresAt = Date.now() + 24*60*60*1000;
     await persistBulkJob(job, 'description');
     for (let i = 0; i < job.results.length; i++) {
+      if (job.cancelled) { job.state='cancelled'; job.finishedAt=new Date().toISOString(); job.current=null; job.expiresAt=Date.now()+DESCRIPTION_JOB_TTL_MS; await persistBulkJob(job,'description'); return; }
       if (wa.state !== 'connected' || !wa.sock) { markJobPaused(job, 'WhatsApp disconnected. The job will resume automatically after reconnection.'); await persistBulkJob(job, 'description'); return; }
       const result = job.results[i];
       if (result.status === 'success') continue;
@@ -1712,7 +1743,7 @@ async function createDescriptionJob(req, action, ids, description) {
   if (active) throw new Error(`A description job is already ${active.state}. Wait for it to finish or reconnect to it.`);
   const all = await getGroups(getWA(req.user.userId), false);
   const results = ids.map((id)=>({id,name:String(all[id]?.subject||id),status:'pending',error:null}));
-  const job={id:`DESC-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(2).toString('hex')}`,type:'description',userId:String(req.user.userId),action,description,total:results.length,results,done:0,success:0,failed:0,current:null,state:'queued',startedAt:null,finishedAt:null,updatedAt:Date.now(),error:null,createdAt:Date.now(),expiresAt:Date.now()+24*60*60*1000};
+  const job={id:`DESC-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(2).toString('hex')}`,type:'description',userId:String(req.user.userId),action,description,total:results.length,results,done:0,success:0,failed:0,current:null,state:'queued',cancelled:false,startedAt:null,finishedAt:null,updatedAt:Date.now(),error:null,createdAt:Date.now(),expiresAt:Date.now()+24*60*60*1000};
   descriptionJobs.set(job.id,job); await persistBulkJob(job,'description'); runDescriptionJob(job).catch(()=>{}); return job;
 }
 
@@ -1751,16 +1782,129 @@ app.post('/api/group-description/job/:id/retry', requireAuth, needWA, async (req
   descriptionJobs.set(retry.id,retry); await persistBulkJob(retry,'description'); runDescriptionJob(retry).catch(()=>{}); res.json({ok:true,job:descriptionJobPublic(retry)});
 });
 
+
+async function cancelBulkJob(type, id, userId) {
+  const map = type === 'dp' ? dpJobs : type === 'description' ? descriptionJobs : memberRemovalJobs;
+  const job = await loadBulkJob(id, userId, type);
+  if (!job) throw new Error('Job not found or expired.');
+  if (!['queued','running','paused'].includes(job.state)) return job;
+  job.cancelled = true;
+  job.state = 'cancelling';
+  job.error = 'Cancellation requested. Finishing the current operation…';
+  job.updatedAt = Date.now();
+  map.set(job.id, job);
+  await persistBulkJob(job, type);
+  return job;
+}
+
+app.post('/api/group-dp/job/:id/cancel', requireAuth, async (req,res)=>{
+  try { res.json({ok:true,job:dpJobPublic(await cancelBulkJob('dp',req.params.id,req.user.userId))}); }
+  catch(e){ res.status(400).json({error:dpErrorText(e)}); }
+});
+app.post('/api/group-description/job/:id/cancel', requireAuth, async (req,res)=>{
+  try { res.json({ok:true,job:descriptionJobPublic(await cancelBulkJob('description',req.params.id,req.user.userId))}); }
+  catch(e){ res.status(400).json({error:descriptionErrorText(e)}); }
+});
+
 async function resumeBulkJobsForUser(userId) {
   const wa=getWA(userId); if(wa.state!=='connected'||!wa.sock)return;
-  for(const type of ['dp','description']) {
-    const map=type==='dp'?dpJobs:descriptionJobs;
+  for(const type of ['dp','description','member-removal']) {
+    const map=type==='dp'?dpJobs:type==='description'?descriptionJobs:memberRemovalJobs;
     const job=await findActiveBulkJob(userId,type); if(!job)continue;
     if(job.state==='running') { const running=job.results?.find((x)=>x.status==='running'); if(running) running.status='pending'; job.current=null; }
-    if(type==='dp') { map.set(job.id,job); runDpJob(job).catch(()=>{}); }
-    else { map.set(job.id,job); runDescriptionJob(job).catch(()=>{}); }
+    map.set(job.id,job);
+    if(type==='dp') runDpJob(job).catch(()=>{});
+    else if(type==='description') runDescriptionJob(job).catch(()=>{});
+    else runMemberRemovalJob(job).catch(()=>{});
   }
 }
+
+
+/* ---------- Group Member Remover ---------- */
+function memberRemovalPublic(job){
+  if(!job) return null;
+  return {id:job.id,state:job.state,total:job.total,done:job.done,removed:job.removed,failed:job.failed,skipped:job.skipped,current:job.current,results:job.results||[],error:job.error||null,cancelled:!!job.cancelled,startedAt:job.startedAt,finishedAt:job.finishedAt};
+}
+function cleanMemberJid(v){
+  const s=String(v||'').trim();
+  return s.includes('@') ? s : (s ? `${s}@s.whatsapp.net` : '');
+}
+function memberDisplay(p){ return String(p?.notify || p?.name || p?.jid || p?.id || '').trim() || String(p?.id||''); }
+function memberSelfJid(wa){
+  return cleanMemberJid(String(wa?.sock?.user?.id || '').replace(/:.+$/,''));
+}
+function memberRemovalTransient(e){
+  const s=String(e?.message||e||'').toLowerCase();
+  return /429|rate.?limit|too many|timed out|timeout|connection closed|connection reset|temporar|503|502|network/.test(s);
+}
+async function removeMemberSafely(wa, task){
+  let last;
+  for(let attempt=0; attempt<=MEMBER_REMOVER_RETRY_LIMIT; attempt++){
+    try{
+      await Promise.race([
+        withWALinkLimit(wa,()=>wa.sock.groupParticipantsUpdate(task.groupId,[task.memberJid],'remove')),
+        new Promise((_,reject)=>setTimeout(()=>reject(new Error('Member removal request timed out.')), MEMBER_REMOVER_REQUEST_TIMEOUT_MS))
+      ]);
+      return;
+    }catch(e){
+      last=e;
+      if(!memberRemovalTransient(e) || attempt>=MEMBER_REMOVER_RETRY_LIMIT) throw e;
+      await sleep(Math.min(5000, 1200 * (attempt + 1)));
+    }
+  }
+  throw last || new Error('Member removal failed.');
+}
+async function loadSelectedMembers(userId, ids){
+  const wa=getWA(userId);
+  let all=await getGroups(wa,false);
+  let selected=ids.map(id=>all[id]).filter(Boolean);
+  if(selected.length!==ids.length || selected.some(g=>!Array.isArray(g.participants))){
+    all=await getGroups(wa,true);
+    selected=ids.map(id=>all[id]).filter(Boolean);
+  }
+  if(!selected.length) throw new Error('The selected groups could not be loaded. Refresh groups and try again.');
+  const members=new Map();
+  for(const g of selected){
+    for(const p of (Array.isArray(g.participants)?g.participants:[])){
+      const jid=cleanMemberJid(p?.id||p?.jid); if(!jid) continue;
+      if(!members.has(jid)) members.set(jid,{jid,name:memberDisplay(p),groups:[]});
+      members.get(jid).groups.push({id:g.id,name:String(g.subject||g.id),admin:p.admin||null,self:jid===memberSelfJid(wa)});
+    }
+  }
+  return {groups:selected.map(g=>({id:g.id,name:String(g.subject||g.id),size:g.participants?.length||0})),members:[...members.values()]};
+}
+async function runMemberRemovalJob(job){
+  const key=activeJobKey(job.userId,'member-removal');
+  if(activeBulkJobs.has(key)) return;
+  activeBulkJobs.add(key); const wa=getWA(job.userId);
+  try{
+    job.state='running'; job.startedAt ||= new Date().toISOString(); await persistMemberRemovalJob(job);
+    for(let i=0;i<job.tasks.length;i++){
+      if(job.cancelled){job.state='cancelled';job.finishedAt=new Date().toISOString();job.current=null;await persistMemberRemovalJob(job);break;}
+      const t=job.tasks[i]; if(t.status==='success'||t.status==='skipped') continue;
+      if(wa.state!=='connected'||!wa.sock){t.status='pending';job.state='paused';job.error='WhatsApp disconnected. Reconnect and reopen this job to resume.';job.current=null;await persistMemberRemovalJob(job);return;}
+      job.current={index:i+1,total:job.total,name:t.groupName,member:t.memberName}; t.status='running';
+      try{
+        const self=memberSelfJid(wa);
+        if(t.admin || t.self || (self && t.memberJid===self)){t.status='skipped';t.note='Admin/self skipped for safety.';job.skipped++;}
+        else { await removeMemberSafely(wa,t); t.status='success';job.removed++;}
+      }catch(e){
+        if(wa.state!=='connected' || !wa.sock){t.status='pending';job.state='paused';job.error='WhatsApp disconnected during removal. Reconnect and reopen this job to resume.';job.current=null;await persistMemberRemovalJob(job);return;}
+        t.status='failed';t.error=errText(e);job.failed++;
+      }
+      job.done=job.tasks.filter(x=>['success','failed','skipped'].includes(x.status)).length; job.current=null; await persistMemberRemovalJob(job);
+      if(job.cancelled){job.state='cancelled';job.finishedAt=new Date().toISOString();break;}
+      if(i<job.tasks.length-1) await sleep(MEMBER_REMOVER_GAP_MS);
+    }
+    if(job.state==='running'){job.state='finished';job.finishedAt=new Date().toISOString();await persistMemberRemovalJob(job);}
+  }catch(e){job.state='error';job.error=errText(e);job.finishedAt=new Date().toISOString();await persistMemberRemovalJob(job);}
+  finally{activeBulkJobs.delete(key);}
+}
+app.post('/api/member-remover/members',requireAuth,needWA,async(req,res)=>{try{const ids=[...new Set(Array.isArray(req.body?.ids)?req.body.ids.map(String).filter(x=>x.endsWith('@g.us')):[])];if(!ids.length)throw new Error('Select at least one group.');if(ids.length>MEMBER_REMOVER_MAX_GROUPS)throw new Error(`Please select no more than ${MEMBER_REMOVER_MAX_GROUPS} groups.`);const data=await loadSelectedMembers(req.user.userId,ids);res.json(data);}catch(e){res.status(400).json({error:errText(e)});}});
+app.post('/api/member-remover/start',requireAuth,needWA,async(req,res)=>{try{const ids=[...new Set(Array.isArray(req.body?.groupIds)?req.body.groupIds.map(String):[])];const members=[...new Set(Array.isArray(req.body?.memberJids)?req.body.memberJids.map(cleanMemberJid).filter(Boolean):[])];if(!ids.length||!members.length)throw new Error('Select groups and at least one member.');if(ids.length>MEMBER_REMOVER_MAX_GROUPS)throw new Error(`Please select no more than ${MEMBER_REMOVER_MAX_GROUPS} groups.`);if(members.length>MEMBER_REMOVER_MAX_MEMBERS)throw new Error(`Please select no more than ${MEMBER_REMOVER_MAX_MEMBERS} members.`);const active=await findActiveBulkJob(req.user.userId,'member-removal');if(active&&['queued','running','paused','cancelling'].includes(active.state))throw new Error('A member removal job is already active.');const data=await loadSelectedMembers(req.user.userId,ids);const memberMap=new Map(data.members.map(m=>[m.jid,m]));const tasks=[];for(const m of members){const info=memberMap.get(m);if(!info)continue;for(const g of info.groups){tasks.push({groupId:g.id,groupName:g.name,memberJid:m,memberName:info.name,admin:!!g.admin,self:!!g.self,status:(g.admin||g.self)?'skipped':'pending',error:null,note:(g.admin||g.self)?'Admin/self skipped for safety.':null});}}if(!tasks.length)throw new Error('None of the selected members are present in the selected groups.');const preSkipped=tasks.filter(t=>t.status==='skipped').length;const job={id:`REM-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(2).toString('hex')}`,userId:String(req.user.userId),state:'queued',total:tasks.length,done:preSkipped,removed:0,failed:0,skipped:preSkipped,current:null,tasks,results:tasks,error:null,cancelled:false,startedAt:null,finishedAt:null,createdAt:Date.now()};memberRemovalJobs.set(job.id,job);await persistMemberRemovalJob(job);runMemberRemovalJob(job).catch(async e=>{job.state='error';job.error=errText(e);await persistMemberRemovalJob(job);});res.json({ok:true,job:memberRemovalPublic(job)});}catch(e){res.status(400).json({error:errText(e)});}});
+app.get('/api/member-remover/job/:id',requireAuth,async(req,res)=>{let j=await loadBulkJob(req.params.id,req.user.userId,'member-removal');if(!j||String(j.userId)!==String(req.user.userId))return res.status(404).json({error:'Member removal job not found'});memberRemovalJobs.set(j.id,j);if(j.state==='paused'&&getWA(req.user.userId).state==='connected')runMemberRemovalJob(j).catch(()=>{});res.json({job:memberRemovalPublic(j)});});
+app.get('/api/member-remover/active',requireAuth,async(req,res)=>{let j=await findLatestBulkJob(req.user.userId,'member-removal');if(j) memberRemovalJobs.set(j.id,j);res.json({job:memberRemovalPublic(j)});});
+app.post('/api/member-remover/job/:id/cancel',requireAuth,async(req,res)=>{let j=await loadBulkJob(req.params.id,req.user.userId,'member-removal');if(!j||String(j.userId)!==String(req.user.userId))return res.status(404).json({error:'Member removal job not found'});memberRemovalJobs.set(j.id,j);if(!['queued','running','paused','cancelling'].includes(j.state))return res.json({ok:true,job:memberRemovalPublic(j)});j.cancelled=true;j.state='cancelling';await persistMemberRemovalJob(j);res.json({ok:true,job:memberRemovalPublic(j)});});
 
 /* ---------- Group permissions ---------- */
 
@@ -1770,13 +1914,15 @@ function permissionJobPublic(job) {
   return {
     id: job.id,
     state: job.state,
+    cancelled: !!job.cancelled,
     total: job.total,
     done: job.done,
     updated: job.updated,
     phase: job.phase || 'running',
     remaining: job.remaining ?? 0,
     results: job.results,
-    error: job.error || null
+    error: job.error || null,
+    cancelled: !!job.cancelled
   };
 }
 
@@ -1797,6 +1943,7 @@ async function runPermissionJob(job, ids, changes, all, wa) {
 
   async function worker() {
     while (true) {
+      if (job.cancelled) return;
       const index = nextIndex++;
       if (index >= ids.length) return;
       const id = ids[index];
@@ -1835,6 +1982,8 @@ async function runPermissionJob(job, ids, changes, all, wa) {
   await Promise.all(
     Array.from({ length: Math.min(PERMISSION_CONCURRENCY, ids.length) }, () => worker())
   );
+
+  if (job.cancelled) { job.state='cancelled'; job.phase='cancelled'; job.updated=Date.now(); return; }
 
   // One/few verification passes turn this into a real "eventual completion"
   // workflow: only groups whose WhatsApp state is still different are retried.
@@ -1923,7 +2072,8 @@ app.post('/api/group-permissions', requireAuth, needWA, async (req, res) => {
       done: 0,
       updated: Date.now(),
       results: [],
-      error: null
+      error: null,
+      cancelled: false
     };
 
     permissionJobs.set(job.id, job);
@@ -1948,6 +2098,14 @@ app.get('/api/group-permission-job/:id', requireAuth, (req, res) => {
   const job = permissionJobs.get(req.params.id);
   if (!job || job.userId !== req.user.userId) {
     return res.status(404).json({ error: 'Permission job not found' });
+app.post('/api/group-permission-job/:id/cancel', requireAuth, (req,res)=>{
+  const job=permissionJobs.get(req.params.id);
+  if(!job || job.userId!==req.user.userId) return res.status(404).json({error:'Permission job not found'});
+  if(['done','error','cancelled'].includes(job.state)) return res.json({ok:true,job:permissionJobPublic(job)});
+  job.cancelled=true; job.state='cancelling'; job.phase='cancelling'; job.updated=Date.now();
+  res.json({ok:true,job:permissionJobPublic(job)});
+});
+
   }
   res.json(permissionJobPublic(job));
 });
@@ -2162,6 +2320,7 @@ async function runGroupNameJob(job, plan, wa) {
   // common cause of WhatsApp rate-overlimit responses. A small cooldown keeps
   // the worker fast for normal batches while avoiding bursty traffic.
   for (let i = 0; i < job.results.length; i++) {
+    if (job.cancelled) { job.state='cancelled'; job.phase='cancelled'; job.updated=Date.now(); return; }
     const item = job.results[i];
     if (item.oldName === item.newName) {
       item.ok = true;
@@ -2227,6 +2386,7 @@ app.post('/api/group-names', requireAuth, needWA, async (req, res) => {
       updated: Date.now(),
       results: [],
       error: null,
+      cancelled: false,
       mode
     };
 
@@ -2254,6 +2414,14 @@ app.get('/api/group-name-job/:id', requireAuth, (req, res) => {
   const job = groupNameJobs.get(req.params.id);
   if (!job || job.userId !== req.user.userId) {
     return res.status(404).json({ error: 'Group name job not found' });
+app.post('/api/group-name-job/:id/cancel', requireAuth, (req,res)=>{
+  const job=groupNameJobs.get(req.params.id);
+  if(!job || job.userId!==req.user.userId) return res.status(404).json({error:'Group name job not found'});
+  if(['done','error','cancelled'].includes(job.state)) return res.json({ok:true,job:groupNamePublic(job)});
+  job.cancelled=true; job.state='cancelling'; job.phase='cancelling'; job.updated=Date.now();
+  res.json({ok:true,job:groupNamePublic(job)});
+});
+
   }
   res.json(groupNamePublic(job));
 });
@@ -2885,6 +3053,7 @@ async function runJob(job, items, fresh, wa) {
 
   async function worker() {
     while (true) {
+      if (job.cancelled) return;
       const index = nextIndex++;
 
       if (index >= todo.length) {
@@ -2958,6 +3127,7 @@ async function runJob(job, items, fresh, wa) {
 
     async function retryWorker() {
       while (true) {
+        if (job.cancelled) return;
         const index = retryIndex++;
 
         if (index >= retry.length) {
@@ -3112,6 +3282,7 @@ app.post('/api/links', requireAuth, needWA, async (req, res) => {
       done: 0,
       results: [],
       finished: false,
+      cancelled: false,
       error: null,
       createdAt: Date.now()
     };
@@ -3128,6 +3299,15 @@ app.post('/api/links', requireAuth, needWA, async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: 'Could not fetch links: ' + e.message });
   }
+});
+
+
+app.post('/api/job/:id/cancel', requireAuth, (req,res)=>{
+  const job=jobs.get(req.params.id);
+  if(!job || job.userId!==req.user.userId) return res.status(404).json({error:'Job not found'});
+  if(job.finished) return res.json({ok:true,job});
+  job.cancelled=true; job.error=null;
+  res.json({ok:true,job});
 });
 
 app.get('/api/job/:id', requireAuth, (req, res) => {
@@ -3254,6 +3434,8 @@ app.get('/link-organizer.html', (req, res) => {
 app.get('/group-dp.html', (req, res) => {
   res.sendFile('group-dp.html', { root: 'public' });
 });
+
+app.get('/member-remover.html', (req, res) => { res.sendFile('member-remover.html', { root: 'public' }); });
 
 app.get('/group-description.html', (req, res) => {
   res.sendFile('group-description.html', { root: 'public' });

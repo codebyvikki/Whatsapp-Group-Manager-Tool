@@ -7,6 +7,8 @@ const PERMISSIONS = [
   { key: 'approveNewMembers', label: 'Approve new members' }
 ];
 
+let activePermissionJobId = null;
+
 const state = {
   groups: [],
   selected: new Set(),
@@ -520,6 +522,9 @@ function renderJob(job) {
   $('progressFill').style.width = `${pct}%`;
   $('progressPercent').textContent = `${pct}%`;
 
+  $('cancelPermission').hidden = !['queued','running','cancelling'].includes(job.state);
+  $('cancelPermission').disabled = job.state === 'cancelling';
+
   if (job.state === 'done') {
     const failed =
       (job.results || []).filter(
@@ -530,6 +535,10 @@ function renderJob(job) {
       ? `Finished ${job.done} / ${job.total} groups · ${failed} still need attention`
       : `Completed & verified ${job.done} / ${job.total} groups`;
 
+  } else if (job.state === 'cancelled') {
+    $('progressText').textContent = `Cancelled after ${job.done} / ${job.total} groups`;
+  } else if (job.state === 'cancelling') {
+    $('progressText').textContent = `Cancelling after ${job.done} / ${job.total} groups…`;
   } else if (job.phase === 'retrying') {
     $('progressText').textContent =
       `Retrying ${job.remaining ?? 0} groups that still need changes`;
@@ -599,8 +608,7 @@ async function waitForJob(id) {
     renderJob(job);
 
     if (
-      job.state === 'done' ||
-      job.state === 'error'
+      ['done','cancelled','error'].includes(job.state)
     ) {
       if (job.state === 'error') {
         throw new Error(
@@ -704,6 +712,7 @@ async function applyChanges(
       }
     );
 
+    activePermissionJobId = data.job.id;
     await waitForJob(data.job.id);
 
     state.pending = {};
@@ -822,6 +831,14 @@ for (
     () => togglePermission(btn.dataset.key)
   );
 }
+
+$('cancelPermission').addEventListener('click', async () => {
+  if (!activePermissionJobId || !confirm('Cancel this operation? Changes already completed cannot be undone.')) return;
+  try {
+    const job = await api(`/api/group-permission-job/${encodeURIComponent(activePermissionJobId)}/cancel`, { method:'POST', body:'{}' });
+    renderJob(job);
+  } catch (e) { alert(e.message); }
+});
 
 $('applyChanges').addEventListener(
   'click',

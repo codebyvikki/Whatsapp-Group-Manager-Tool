@@ -749,7 +749,19 @@ button.ghost:hover:not(:disabled){
     padding:8px 13px
   }
 }
-</style>
+
+/* Consistent inactive-tab hover: keep the selected tab green; inactive tabs only darken text. */
+.action-tabs button:not(.on):hover:not(:disabled), .mode-tabs button:not(.on):hover:not(:disabled), .tabs button:not(.on):hover:not(:disabled){
+  background: transparent !important;
+  color: var(--ink) !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+.action-tabs button.on:hover:not(:disabled), .mode-tabs button.on:hover:not(:disabled), .tabs button.on:hover:not(:disabled){
+  background: var(--brand) !important;
+  color: #fff !important;
+}
+.cancel-operation{border-color:#e7b7b1!important;background:#fff!important;color:var(--danger)!important}.cancel-operation:hover:not(:disabled){background:var(--danger-soft)!important;box-shadow:none!important}</style>
 </head>
 
 <body>
@@ -1038,9 +1050,7 @@ button.ghost:hover:not(:disabled){
 
       <div class="result-list" id="resultList"></div>
 
-      <button class="ghost small" id="retryBtn" hidden>
-        Retry Failed Groups
-      </button>
+      <div class="actions"><button class="ghost small" id="retryBtn" hidden>Retry Failed Groups</button><button class="ghost small cancel-operation" id="cancelBtn" hidden>Cancel Operation</button></div>
 
     </div>
 
@@ -1697,6 +1707,10 @@ function renderJob(job){
   $('jobState').textContent=
     job.state==='finished'
       ?'Completed'
+      :job.state==='cancelled'
+        ?'Cancelled'
+        :job.state==='cancelling'
+          ?'Cancelling…'
       :job.state==='error'
         ?'Stopped'
         :job.state==='running'
@@ -1771,12 +1785,9 @@ function renderJob(job){
       )
       .join('');
 
-  $('retryBtn').hidden=
-    !(
-      job.state==='finished'||
-      job.state==='error'
-    )||
-    !job.failed;
+  $('retryBtn').hidden=!((job.state==='finished'||job.state==='error')&&job.failed);
+  $('cancelBtn').hidden=!['queued','running','paused','cancelling'].includes(job.state);
+  $('cancelBtn').disabled=job.state==='cancelling';
 
   if(job.current){
 
@@ -1787,6 +1798,7 @@ function renderJob(job){
         job.current.name
       }`;
 
+  }else if(job.state==='cancelled'){ $('progress').textContent=`Cancelled: ${job.done}/${job.total} processed.`;
   }else if(job.state==='finished'){
 
     $('progress').textContent=
@@ -1805,7 +1817,7 @@ async function pollJob(id){
       const j=(await api('/api/group-dp/job/'+encodeURIComponent(id))).job;
       transientFailures=0;
       renderJob(j);
-      if(j.state==='finished'||j.state==='error') return;
+      if(['finished','cancelled','error'].includes(j.state)) return;
       await wait(700);
     }catch(e){
       if(e?.status===404){
@@ -1824,7 +1836,7 @@ async function restoreJob(){
     const j=(await api('/api/group-dp/active')).job;
     if(!j)return;
     renderJob(j);
-    if(j.state!=='finished'&&j.state!=='error') await pollJob(j.id);
+    if(!['finished','cancelled','error'].includes(j.state)) await pollJob(j.id);
   }catch(e){
     if(e?.status!==401) $('err').textContent='Could not restore the previous DP task. Refresh to retry.';
   }
@@ -1905,6 +1917,17 @@ $('applyBtn').onclick=async()=>{
 
   }
 
+};
+
+
+$('cancelBtn').onclick=async()=>{
+  if(!currentJobId)return;
+  if(!confirm('Cancel this operation? Changes already completed cannot be undone.'))return;
+  try{
+    $('cancelBtn').disabled=true;
+    const j=(await api('/api/group-dp/job/'+encodeURIComponent(currentJobId)+'/cancel',{})).job;
+    renderJob(j);
+  }catch(e){$('err').textContent=e.message}
 };
 
 $('retryBtn').onclick=async()=>{

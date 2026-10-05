@@ -9,6 +9,7 @@
   let previewPayloadJson = '';
   let pollTimer = null;
   let busy = false;
+  let activeJobId = null;
 
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
@@ -209,7 +210,7 @@
     $('progress').classList.remove('hidden');
     try {
       const data = await api('/api/group-names', { method: 'POST', body: JSON.stringify(body) });
-      if (data.job?.id) await pollJob(data.job.id);
+      if (data.job?.id) { activeJobId = data.job.id; await pollJob(data.job.id); }
     } catch (e) {
       busy = false;
       $('preview').disabled = false;
@@ -226,10 +227,12 @@
         const done = Number(job.done || 0);
         const pct = total ? Math.min(100, Math.round(done * 100 / total)) : 0;
         $('progressText').textContent = `${done} / ${total}`;
-        $('progressState').textContent = job.phase === 'retrying' ? 'Retrying rate-limited groups…' : job.state === 'done' ? 'Completed' : 'Renaming…';
+        $('progressState').textContent = job.phase === 'retrying' ? 'Retrying rate-limited groups…' : job.state === 'cancelled' ? 'Cancelled' : job.state === 'cancelling' ? 'Cancelling…' : job.state === 'done' ? 'Completed' : 'Renaming…';
+        $('cancelRename').hidden = !['queued','running','cancelling'].includes(job.state);
+        $('cancelRename').disabled = job.state === 'cancelling';
         $('bar').style.width = `${pct}%`;
         renderResults(job);
-        if (job.state === 'done' || job.state === 'error') {
+        if (['done','cancelled','error'].includes(job.state)) {
           clearInterval(pollTimer); pollTimer = null;
           busy = false;
           $('refresh').disabled = false;
@@ -284,6 +287,11 @@
   $('listClear').addEventListener('click', () => { selected.clear(); renderPicker('groupList','search'); renderPicker('listGroups','listSearch'); renderPicker('rangeList','rangeSearch',groups.filter((g)=>rangeMatches.has(g.id))); updateCounts(); invalidatePreview(); });
   $('preview').addEventListener('click', preview);
   $('rename').addEventListener('click', startRename);
+  $('cancelRename').addEventListener('click', async () => {
+    if (!activeJobId || !confirm('Cancel this operation? Changes already completed cannot be undone.')) return;
+    try { await api(`/api/group-name-job/${encodeURIComponent(activeJobId)}/cancel`, { method:'POST', body:'{}' }); }
+    catch (e) { setMessage(e.message, 'error'); }
+  });
 
   loadGroups(false);
   refreshStatus();

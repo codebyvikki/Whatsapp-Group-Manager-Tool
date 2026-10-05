@@ -552,7 +552,19 @@ section{
   }
 }
 
-</style>
+
+/* Consistent inactive-tab hover: keep the selected tab green; inactive tabs only darken text. */
+.action-tabs button:not(.on):hover:not(:disabled), .mode-tabs button:not(.on):hover:not(:disabled), .tabs button:not(.on):hover:not(:disabled){
+  background: transparent !important;
+  color: var(--ink) !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+.action-tabs button.on:hover:not(:disabled), .mode-tabs button.on:hover:not(:disabled), .tabs button.on:hover:not(:disabled){
+  background: var(--brand) !important;
+  color: #fff !important;
+}
+.cancel-operation{border-color:#e7b7b1!important;background:#fff!important;color:var(--danger)!important}.cancel-operation:hover:not(:disabled){background:var(--danger-soft)!important;box-shadow:none!important}</style>
 </head>
 
 <body>
@@ -1113,6 +1125,8 @@ Ranchi Team"
       <div class="progressbar">
         <i id="bar"></i>
       </div>
+
+      <div class="actions"><button id="cancelRename" class="ghost cancel-operation" hidden>Cancel Operation</button></div>
 
 
       <div

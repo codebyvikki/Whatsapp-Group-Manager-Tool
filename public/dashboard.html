@@ -536,6 +536,7 @@ main{
     background .18s ease;
 }
 
+
 .featured-tool:hover{
   transform:translateY(-2px);
   box-shadow:var(--shadow-hover);
@@ -547,6 +548,11 @@ main{
   margin-bottom:20px;
 }
 
+.member-remover-tool{
+  margin-top:14px;
+  margin-bottom:14px;
+  padding:24px;
+}
 
 .tool-icon{
   width:50px;
@@ -636,6 +642,11 @@ main{
   gap:14px;
 }
 
+/* Keep every dashboard tool row separated by the same 14px spacing. */
+.tools-grid + .tools-grid{
+  margin-top:14px;
+}
+
 .tool-card{
   display:flex;
   flex-direction:column;
@@ -649,6 +660,15 @@ main{
     transform .18s ease,
     box-shadow .18s ease,
     border-color .18s ease;
+}
+
+.tool-card.horizontal-tool{
+  grid-column:1 / -1;
+  min-height:170px;
+}
+
+.tool-card.horizontal-tool .card-bottom{
+  padding-top:16px;
 }
 
 .tool-card:hover{
@@ -2313,6 +2333,17 @@ body.connection-page-active .account-bar #headerStatus{
   </a>
 
 </div>
+
+<a href="/member-remover.html" class="featured-tool member-remover-tool">
+  <div class="tool-icon" aria-hidden="true">👥</div>
+  <div class="tool-content">
+    <div class="tool-top">
+      <h3 class="tool-title">Group Member Remover</h3>
+    </div>
+    <p class="tool-description">Load selected groups, automatically exclude admins and your own account, then remove the remaining members with live progress and cancellation.</p>
+  </div>
+  <span class="open-btn">Open Member Remover <span class="arrow">→</span></span>
+</a>
 
 
 <!-- =========================
