@@ -565,9 +565,18 @@ main{
   flex:none;
 }
 
+
 .tool-icon svg{
   width:31px;
   height:31px;
+}
+
+/* Member Remover - people emoji */
+.member-remover-tool .tool-icon{
+  font-size:28px;
+  line-height:1;
+  display:grid;
+  place-items:center;
 }
 
 .tool-content{
@@ -705,6 +714,11 @@ main{
   display:block;
 }
 
+/* Group Permissions setting icon */
+.permissions-icon{
+  font-size:34px;
+  line-height:1;
+}
 
 /*
    LIVE STATS ICON
@@ -2170,7 +2184,7 @@ body.connection-page-active .account-bar #headerStatus{
 
     <div class="card-top">
 
-      <div class="card-icon">
+      <div class="card-icon permissions-icon">
         ⚙
       </div>
 
@@ -2335,7 +2349,34 @@ body.connection-page-active .account-bar #headerStatus{
 </div>
 
 <a href="/member-remover.html" class="featured-tool member-remover-tool">
-  <div class="tool-icon" aria-hidden="true">👥</div>
+  <div class="tool-icon">
+
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true">
+
+      <path
+        d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+
+      <circle
+        cx="9"
+        cy="7"
+        r="4"/>
+
+      <line
+        x1="16"
+        y1="11"
+        x2="22"
+        y2="11"/>
+
+    </svg>
+
+  </div>
   <div class="tool-content">
     <div class="tool-top">
       <h3 class="tool-title">Group Member Remover</h3>

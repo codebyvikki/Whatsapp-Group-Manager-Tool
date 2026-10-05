@@ -27,7 +27,10 @@
   }
 
   function updateHeader(connected, text) {
-    $('waStatus').classList.toggle('connected', Boolean(connected));
+    const status = $('waStatus');
+    const isConnected = Boolean(connected);
+    status.classList.toggle('connected', isConnected);
+    status.classList.toggle('disconnected', !isConnected);
     $('waText').textContent = text;
   }
 
