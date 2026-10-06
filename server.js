@@ -17,6 +17,7 @@ async function getSharp() {
 import fs from 'fs';
 import { MongoClient, Binary } from 'mongodb';
 import { createStats, registerStatsRoutes } from './stats.js';
+import { createMessageManager, registerMessageRoutes, registerGroupDeleterRoutes } from './message-manager.js';
 import makeWASocket, {
   useMultiFileAuthState,
   DisconnectReason,
@@ -501,7 +502,8 @@ function createWAContext(userId) {
     linkQueue: [],
     stats: null,
     statsLoaded: false,
-    statsAttached: false
+    statsAttached: false,
+    messageManager: null
   };
 
   wa.stats = createStats({
@@ -512,6 +514,15 @@ function createWAContext(userId) {
     withLimit: (task) => withWALinkLimit(wa, task),
     sleep,
     refreshGroups: () => getGroups(wa, true)
+  });
+
+  wa.messageManager = createMessageManager({
+    getSock: () => (wa.state === 'connected' ? wa.sock : null),
+    getGroupCache: () => wa.groupCache,
+    refreshGroups: () => getGroups(wa, true),
+    maxGroups: Math.max(1, Number(process.env.MAX_MESSAGE_GROUPS || 500)),
+    maxMessageLength: Math.max(1, Number(process.env.MAX_MESSAGE_LENGTH || 4096)),
+    sendGapMs: Math.max(250, Number(process.env.MESSAGE_START_GAP_MS || 900))
   });
 
   return wa;
@@ -854,6 +865,7 @@ async function startWA(userId) {
       await wa.stats.load();
     }
     wa.stats.attach(currentSocket);
+    wa.messageManager.attach(currentSocket);
 
     currentSocket.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
       if (wa.sock !== currentSocket) return;
@@ -3540,6 +3552,17 @@ app.post('/api/logout-wa', requireAuth, async (req, res) => {
 
 registerStatsRoutes(app, requireAuth, needWA, getStats);
 
+/* ---------- Message Manager + Group Deleter ---------- */
+
+registerMessageRoutes(app, requireAuth, needWA, (userId) => getWA(userId).messageManager);
+registerGroupDeleterRoutes(
+  app,
+  requireAuth,
+  needWA,
+  (userId) => getWA(userId),
+  (userId) => getWA(userId).messageManager
+);
+
 
 /* ---------- Dashboard / Page Routes ---------- */
 
@@ -3560,6 +3583,9 @@ app.get('/group-dp.html', (req, res) => {
 });
 
 app.get('/member-remover.html', (req, res) => { res.sendFile('member-remover.html', { root: 'public' }); });
+
+app.get('/message-manager.html', (req, res) => { res.sendFile('message-manager.html', { root: 'public' }); });
+app.get('/group-deleter.html', (req, res) => { res.sendFile('group-deleter.html', { root: 'public' }); });
 
 app.get('/group-description.html', (req, res) => {
   res.sendFile('group-description.html', { root: 'public' });
