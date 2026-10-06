@@ -237,6 +237,7 @@ body{
 }
 .backup-save{background:#0a8f4a}
 .backup-delete{background:#d9534f}
+.saved-backup-cards{display:grid;gap:10px;margin:12px 0 4px}.saved-card{border:1px solid #dfe7e2;background:#fbfdfc;border-radius:12px;padding:13px 14px;display:grid;gap:9px}.saved-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.saved-card-head strong{font-size:.92rem}.saved-meta{color:#66736c;font-size:.76rem;margin-top:2px}.saved-dot{color:#128c55;font-size:.74rem;font-weight:800;white-space:nowrap}.saved-preview{color:#66736c;font-size:.78rem;line-height:1.45;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.saved-card-actions{display:flex;gap:8px;flex-wrap:wrap}.saved-card-actions .btn{min-height:34px;padding:7px 12px}.saved-empty{padding:12px 14px;border:1px dashed #dfe7e2;border-radius:11px;color:#66736c;font-size:.8rem;background:#fbfdfc}
 @media(max-width:700px){
     .backup-panel .backup-status{width:100%;margin-left:0}
     .backup-panel select{flex:1;min-width:160px}
@@ -848,18 +849,6 @@ body{
 
 </div>
 
-<div class="backup-panel">
-    <span class="backup-label">☁ Saved Tags Lists</span>
-    <select id="savedTagList">
-        <option value="">No saved lists</option>
-    </select>
-    <button class="btn blue" type="button" onclick="loadSelectedBackup()">Load</button>
-    <button class="btn backup-save" type="button" onclick="saveBackup()">💾 Save Backup</button>
-    <button class="btn" type="button" style="background:#64748b" onclick="saveBackupAs()">＋ Save As</button>
-    <button class="btn backup-delete" type="button" onclick="deleteSelectedBackup()">🗑 Delete</button>
-    <span class="backup-status" id="backupStatus">Not loaded</span>
-</div>
-
 <div class="addrow">
  <input class="name" id="newName" placeholder="Enter group name">
  <input class="num" id="newMembers" type="number" min="0" placeholder="Members">
@@ -867,6 +856,18 @@ body{
  <button class="btn add" onclick="addGroup()">＋ Add</button>
 </div>
 <div id="status" class="status"></div>
+
+<div class="backup-panel">
+    <span class="backup-label">☁ Saved Tags Lists</span>
+    <select id="savedTagList">
+        <option value="">No saved lists</option>
+    </select>
+    <button class="btn blue" type="button" onclick="loadSelectedBackup()">Load</button>
+    <button class="btn backup-save" type="button" onclick="saveBackup()">💾 Save Backup</button>
+    <button class="btn backup-delete" type="button" onclick="deleteSelectedBackup()">🗑 Delete</button>
+    <span class="backup-status" id="backupStatus">Not loaded</span>
+</div>
+<div id="savedBackupCards" class="saved-backup-cards" aria-live="polite"></div>
 
 <div id="modal" class="modalbg">
 
@@ -1155,7 +1156,57 @@ function renderBackupOptions(){
     }else if(local){
         select.value=LOCAL_BACKUP_NAME;
     }
+
+    renderSavedBackupCards();
 }
+
+function renderSavedBackupCards(){
+    const box = $('savedBackupCards');
+    if(!box) return;
+    if(!tagBackups.length){
+        box.innerHTML='<div class="saved-empty">No account-saved Tags Lists yet. Click <b>Save Backup</b> to keep the current list in your profile.</div>';
+        return;
+    }
+    box.innerHTML = tagBackups.map((b, i) => {
+        const groups = Array.isArray(b.snapshot?.groups) ? b.snapshot.groups : [];
+        const preview = groups.slice(0, 5).map(g => String(g?.name || '')).filter(Boolean);
+        const date = b.updatedAt ? new Date(b.updatedAt).toLocaleString() : '';
+        return `<div class="saved-card">
+          <div class="saved-card-head"><div><strong>${esc(b.name)}</strong><div class="saved-meta">${groups.length} groups${date ? ' · Updated ' + esc(date) : ''}</div></div><span class="saved-dot">✓ Saved</span></div>
+          <div class="saved-preview">${preview.length ? preview.map(esc).join(' · ') + (groups.length > preview.length ? ` · +${groups.length-preview.length} more` : '') : 'Empty list'}</div>
+          <div class="saved-card-actions"><button class="btn blue" type="button" data-load-backup="${i}">Load & Edit</button><button class="btn backup-delete" type="button" data-delete-backup="${i}">Delete</button></div>
+        </div>`;
+    }).join('');
+}
+
+document.getElementById('savedBackupCards')?.addEventListener('click', async function(e){
+    const load=e.target.closest('[data-load-backup]');
+    const del=e.target.closest('[data-delete-backup]');
+    if(load){
+        const backup=tagBackups[Number(load.dataset.loadBackup)];
+        if(!backup) return;
+        if(!confirm(`Load saved Tags List "${backup.name}"? Your current unsaved changes will be replaced.`)) return;
+        if(applyTagSnapshot(backup.snapshot)){
+            activeBackupName=backup.name;
+            try{ writeLocalSavedList(backup.snapshot); }catch(err){ console.warn(err); }
+            $('savedTagList').value=backup.name;
+            $('backupStatus').textContent='Loaded from your account · ready to edit';
+            renderBackupOptions();
+        }
+    }
+    if(del){
+        const backup=tagBackups[Number(del.dataset.deleteBackup)];
+        if(!backup) return;
+        if(!confirm(`Delete saved Tags List "${backup.name}"? This cannot be undone.`)) return;
+        try{
+            const result=await apiJSON('/api/tag-backups/delete',{method:'POST',body:JSON.stringify({name:backup.name})});
+            tagBackups=Array.isArray(result.backups)?result.backups:[];
+            if(activeBackupName===backup.name) activeBackupName='';
+            renderBackupOptions();
+            $('backupStatus').textContent='Saved list deleted';
+        }catch(err){ alert(err.message || 'Could not delete saved list.'); }
+    }
+});
 
 async function getCurrentUserForTags(){
     try{
@@ -1202,17 +1253,15 @@ async function loadBackups(){
     }
 }
 
-async function saveBackupAs(){
-    const name = prompt('Enter a name for this Tags List backup:', activeBackupName || 'My Tags List');
-    if(name===null) return;
-    const clean=name.trim();
-    if(!clean){ alert('Please enter a backup name.'); return; }
-    await saveBackupWithName(clean);
-}
-
 async function saveBackup(){
-    if(!activeBackupName) return saveBackupAs();
-    await saveBackupWithName(activeBackupName);
+    let name = activeBackupName;
+    if(!name){
+        name = prompt('Enter a name for this Tags List backup:', 'My Tags List');
+        if(name===null) return;
+        name = name.trim();
+        if(!name){ alert('Please enter a backup name.'); return; }
+    }
+    await saveBackupWithName(name);
 }
 
 async function saveBackupWithName(name){

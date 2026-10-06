@@ -44,12 +44,12 @@
 
     <div id="send-select" class="panel" hidden>
       <div class="search-wrap"><span class="search-icon">⌕</span><input id="q" type="text" placeholder="Search groups..."></div>
-      <div class="actions"><button class="ghost small" id="selAll">Select Visible</button><button class="ghost small" id="selInvert">Invert Visible</button><button class="ghost small" id="selNone">Clear Selection</button><span class="summary grow" id="count">0 selected</span><button class="ghost small" id="reloadGroups">Refresh</button></div>
+      <div class="actions"><button class="ghost small" id="selAll">Select Visible</button><button class="ghost small" id="selInvert">Invert Visible</button><button class="ghost small" id="selNone">Clear Selection</button><span class="summary grow" id="count">0 selected</span><button class="ghost small" id="reloadGroups">Refresh</button><button class="ghost small" id="saveSendList">Save as List</button></div>
       <div class="summary" id="summary">Showing 0 of 0 groups</div><div class="list" id="groupList"></div>
     </div>
 
     <div id="send-lists" class="panel" hidden>
-      <div class="summary">Use a saved list from Link Organizer. The same saved lists are available here.</div>
+      <div class="summary">Use a saved list. Saved lists are shared with the other group tools.</div>
       <div id="listsBox"></div>
     </div>
 
@@ -75,7 +75,7 @@
       <button class="ghost small" id="refreshRead">Refresh</button>
     </div>
     <div class="read-summary"><span>Groups: <b id="readGroups">0</b></span><span>Messages: <b id="readMessages">0</b></span><span>Last sync: <b id="lastSync">Waiting…</b></span></div>
-    <div class="table-wrap"><table><thead><tr><th>Group</th><th id="metricHead">Unread Messages</th><th id="seenHead">Seen Messages</th><th id="statusHead">Status</th></tr></thead><tbody id="readBody"></tbody></table></div>
+    <div class="table-wrap"><table><thead><tr><th>Group</th><th id="metricHead">Unread Messages</th></tr></thead><tbody id="readBody"></tbody></table></div>
     <div class="actions">
       <button class="ghost small" id="copyList">Copy List</button>
       <button class="ghost small" id="txtList">List TXT</button>
@@ -91,7 +91,7 @@
 const $=id=>document.getElementById(id);
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const api=async(url,body,options={})=>{const o={credentials:'same-origin',...options};if(body!==undefined){o.method=options.method||'POST';o.headers={'Content-Type':'application/json',...(options.headers||{})};o.body=JSON.stringify(body)}let last;for(let i=0;i<3;i++){try{const r=await fetch(url,o);const j=await r.json().catch(()=>({}));if(!r.ok)throw Object.assign(new Error(j.error||'Request failed'),{status:r.status});return j}catch(e){last=e;if(e?.status&&![502,503,504].includes(e.status))throw e;if(i<2)await wait(450*(i+1))}}throw last||new Error('Network request failed')};
+const api=async(url,body,options={})=>{const method=String(options.method||(body!==undefined?'POST':'GET')).toUpperCase();const o={credentials:'same-origin',...options,method};if(body!==undefined&&method!=='GET'&&method!=='HEAD'){o.headers={'Content-Type':'application/json',...(options.headers||{})};o.body=JSON.stringify(body)}let last;for(let i=0;i<3;i++){try{const r=await fetch(url,o);const j=await r.json().catch(()=>({}));if(!r.ok)throw Object.assign(new Error(j.error||'Request failed'),{status:r.status});return j}catch(e){last=e;if(e?.status&&![502,503,504].includes(e.status))throw e;if(i<2)await wait(450*(i+1))}}throw last||new Error('Network request failed')};
 
 let groups=[],lists=[],selected=new Set(),sendMode='range',selectedListIds=null,readMode='unread',rows=[],jobId=null,stream=null;
 
@@ -118,18 +118,19 @@ $('prefix').oninput=updateRange;$('from').oninput=updateRange;$('to').oninput=up
 async function loadLists(){try{if(!groups.length)await loadGroups();lists=(await api('/api/lists')).lists||[];renderLists()}catch(e){$('sendError').textContent=e.message}}
 function renderLists(){if(!lists.length){$('listsBox').innerHTML='<div class="summary">No saved lists yet.</div>';return}const names=new Map(groups.map(g=>[g.id,g.name]));$('listsBox').innerHTML=lists.map((l,i)=>`<div class="list-card"><div class="top"><b>${esc(l.name)}</b><span class="list-count">${l.ids.length} groups</span></div><div class="summary">${esc(l.ids.map(id=>names.get(id)).filter(Boolean).slice(0,3).join(', ')||'Saved group selection')}${l.ids.length>3?' + more':''}</div><button class="small" data-use="${i}">Use this list</button></div>`).join('')}
 $('listsBox').onclick=e=>{const b=e.target.closest('[data-use]');if(!b)return;const l=lists[Number(b.dataset.use)];selectedListIds=[...new Set(l.ids)];$('sendError').textContent=`"${l.name}" selected · ${selectedListIds.length} groups ready.`}
+$('saveSendList').onclick=async()=>{if(!selected.size){$('sendError').textContent='Please select at least one group.';return}const name=prompt('Enter a list name:');if(!name)return;try{lists=(await api('/api/lists',{name,ids:[...selected]})).lists||[];$('sendError').textContent=`"${name}" has been saved successfully.`}catch(e){$('sendError').textContent=e.message}}
 
 function targetIds(){if(sendMode==='range'){const ids=rangeIds();if(!ids.length)throw new Error('No groups match the selected range.');return ids}if(sendMode==='select'){if(!selected.size)throw new Error('Please select at least one group.');return [...selected]}if(!selectedListIds?.length)throw new Error('Choose a saved list first.');return [...selectedListIds]}
 
-function renderJob(job){$('job').classList.add('show');$('jobState').textContent=job.state==='finished'?'Completed':job.state==='cancelled'?'Cancelled':job.state==='error'?'Stopped':job.state==='running'?'Sending…':'Queued';$('jobDone').textContent=`${job.done}/${job.total}`;$('jobSuccess').textContent=job.success;$('jobFailed').textContent=job.failed;$('jobBar').style.width=(job.total?Math.round(job.done/job.total*100):0)+'%';$('jobCurrent').textContent=job.current?`Processing ${job.current.index}/${job.current.total}: ${job.current.name}`:(job.error||'');$('jobResults').innerHTML=(job.results||[]).map(x=>`<div class="result-row"><span class="${x.status==='success'?'ok':'bad'}">${x.status==='success'?'✓':'✕'}</span><span class="name">${esc(x.name)}</span>${x.error?`<span class="bad">${esc(x.error)}</span>`:''}</div>`).join('');$('cancelJob').hidden=!['queued','running'].includes(job.state)}
-$('cancelJob').onclick=async()=>{if(!jobId)return;try{await api('/api/messages/jobs/'+encodeURIComponent(jobId),{} ,{method:'GET'});await api('/api/messages/jobs/'+encodeURIComponent(jobId)+'/cancel',{}); }catch(e){$('sendError').textContent=e.message}}
+function renderJob(job){$('job').classList.add('show');$('cancelJob').disabled=false;$('jobState').textContent=job.state==='finished'?'Completed':job.state==='cancelled'?'Cancelled':job.state==='cancelling'?'Cancelling…':job.state==='error'?'Stopped':job.state==='running'?'Sending…':'Queued';$('jobDone').textContent=`${job.done}/${job.total}`;$('jobSuccess').textContent=job.success;$('jobFailed').textContent=job.failed;$('jobBar').style.width=(job.total?Math.round(job.done/job.total*100):0)+'%';$('jobCurrent').textContent=job.current?`Processing ${job.current.index}/${job.current.total}: ${job.current.name}`:(job.error||'');$('jobResults').innerHTML=(job.results||[]).map(x=>`<div class="result-row"><span class="${x.status==='success'?'ok':'bad'}">${x.status==='success'?'✓':'✕'}</span><span class="name">${esc(x.name)}</span>${x.error?`<span class="bad">${esc(x.error)}</span>`:''}</div>`).join('');$('cancelJob').hidden=!['queued','running'].includes(job.state)}
+$('cancelJob').onclick=async()=>{if(!jobId)return;const id=jobId;$('cancelJob').disabled=true;try{const j=await api('/api/messages/jobs/'+encodeURIComponent(id)+'/cancel',{});if(j.job)renderJob(j.job)}catch(e){$('sendError').textContent=e.message;$('cancelJob').disabled=false}}
 
 async function sendMessage(){try{$('sendError').textContent='';const message=$('message').value.trim();const ids=targetIds();if(!message)throw new Error('Enter a message first.');$('sendBtn').disabled=true;const j=await api('/api/messages/send',{message,groupIds:ids});jobId=j.job.id;renderJob(j.job);$('sendBtn').disabled=false}catch(e){$('sendError').textContent=e.message;$('sendBtn').disabled=false}}
 $('sendBtn').onclick=sendMessage;
 
 function applySnapshot(data){rows=data.rows||[];if(data.lastSync)$('lastSync').textContent=new Date(data.lastSync).toLocaleTimeString();renderRead()}
 function filteredRead(){const q=$('readSearch').value.trim().toLowerCase();return rows.filter(r=>!q||r.name.toLowerCase().includes(q)).filter(r=>readMode==='unread'?r.unread>0:true)}
-function renderRead(){const list=filteredRead();$('metricHead').textContent=readMode==='unread'?'Unread Messages':'Total Messages';$('seenHead').textContent=readMode==='unread'?'Seen Messages':'Tracked Seen';$('statusHead').textContent='Read Status';$('readBody').innerHTML=list.length?list.map(r=>{const unread=Math.max(0,Number(r.unread)||0),total=Math.max(0,Number(r.total)||0),seen=Math.max(0,Number(r.seen??(total-unread))||0),status=unread===0?'Seen':'Unread';return `<tr><td>${esc(r.name)}</td><td class="metric">${readMode==='unread'?unread:total}</td><td class="metric">${seen}</td><td><span class="read-status ${status==='Seen'?'seen':'unread'}">${status}</span></td></tr>`}).join(''):'<tr><td colspan="4" class="empty">No matching groups.</td></tr>';$('readGroups').textContent=list.length;$('readMessages').textContent=list.reduce((n,r)=>n+(readMode==='unread'?Math.max(0,Number(r.unread)||0):Math.max(0,Number(r.total)||0)),0)}
+function renderRead(){const list=filteredRead();$('metricHead').textContent=readMode==='unread'?'Unread Messages':'Total Messages';$('readBody').innerHTML=list.length?list.map(r=>{const unread=Math.max(0,Number(r.unread)||0),total=Math.max(0,Number(r.total)||0);return `<tr><td>${esc(r.name)}</td><td class="metric">${readMode==='unread'?unread:total}</td></tr>`}).join(''):'<tr><td colspan="2" class="empty">No matching groups.</td></tr>';$('readGroups').textContent=list.length;$('readMessages').textContent=list.reduce((n,r)=>n+(readMode==='unread'?Math.max(0,Number(r.unread)||0):Math.max(0,Number(r.total)||0)),0)}
 $('readSearch').oninput=renderRead;
 $('readTabs').onclick=e=>{if(!e.target.dataset.read)return;readMode=e.target.dataset.read;$('readTabs').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.read===readMode));renderRead()}
 

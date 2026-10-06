@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { WAMessageStatus } from '@whiskeysockets/baileys';
 
 const MAX_GROUPS_DEFAULT = 500;
 const MAX_MESSAGE_LENGTH_DEFAULT = 4096;
@@ -20,6 +21,13 @@ export function createMessageManager(ctx) {
   const chats = new Map();
   const counts = new Map();
   const seen = new Set();
+  const readSeen = new Set();
+  // Track individual incoming unread message keys so READ events can move
+  // exactly the messages that were seen, rather than relying only on a chat counter.
+  const unreadMessageIds = new Map();
+  // Keep a small, lightweight per-chat history so account-level chat deletion
+  // can send WhatsApp the real message range required by Baileys.
+  const lastMessages = new Map();
   const clients = new Set();
   const jobs = new Map();
   let lastSync = 0;
@@ -46,17 +54,60 @@ export function createMessageManager(ctx) {
     return r;
   };
 
-  const setUnread = (jid, value, markedAsUnread = false) => {
-    if (!isGroupJid(jid)) return;
-    const r = ensureCount(jid);
-    const n = Number(value);
-    r.unread = Number.isFinite(n) && n >= 0
-      ? Math.floor(n)
-      : (markedAsUnread ? 1 : r.unread);
-    if (markedAsUnread && r.unread === 0) r.unread = 1;
-    lastSync = Date.now();
-    scheduleBroadcast([jid]);
+  const unreadSet = (jid) => {
+    let set = unreadMessageIds.get(jid);
+    if (!set) {
+      set = new Set();
+      unreadMessageIds.set(jid, set);
+    }
+    return set;
   };
+
+  const addUnreadMessage = (jid, id) => {
+    if (!isGroupJid(jid) || !id) return false;
+    const set = unreadSet(jid);
+    if (set.has(id)) return false;
+    set.add(id);
+    ensureCount(jid).unread = set.size;
+    return true;
+  };
+
+  const markMessageRead = (jid, id) => {
+    if (!isGroupJid(jid) || !id) return false;
+    const set = unreadMessageIds.get(jid);
+    if (!set || !set.delete(id)) return false;
+    ensureCount(jid).unread = set.size;
+    return true;
+  };
+
+  const clearUnreadMessages = (jid) => {
+    if (!isGroupJid(jid)) return;
+    unreadMessageIds.delete(jid);
+    ensureCount(jid).unread = 0;
+  };
+
+  const rememberMessage = (msg) => {
+    const jid = msg?.key?.remoteJid;
+    const id = msg?.key?.id;
+    const ts = Number(msg?.messageTimestamp || 0);
+    if (!isGroupJid(jid) || !id || !Number.isFinite(ts) || ts <= 0) return;
+    let list = lastMessages.get(jid) || [];
+    const key = String(id);
+    list = list.filter((m) => String(m?.key?.id || '') !== key);
+    list.push({
+      key: {
+        remoteJid: jid,
+        id: key,
+        ...(msg?.key?.fromMe !== undefined ? { fromMe: !!msg.key.fromMe } : {}),
+        ...(msg?.key?.participant ? { participant: msg.key.participant } : {})
+      },
+      messageTimestamp: ts
+    });
+    list.sort((a, b) => Number(b.messageTimestamp || 0) - Number(a.messageTimestamp || 0));
+    lastMessages.set(jid, list.slice(0, 20));
+  };
+
+  const getLastMessages = (jid) => [...(lastMessages.get(jid) || [])];
 
   const touch = (ids = []) => {
     lastSync = Date.now();
@@ -142,8 +193,12 @@ export function createMessageManager(ctx) {
       for (const msg of payload.messages || []) {
         const jid = msg?.key?.remoteJid;
         const id = msg?.key?.id;
+        rememberMessage(msg);
         if (!isGroupJid(jid) || !id || !markSeen(jid, id)) continue;
         ensureCount(jid).total++;
+        // History itself does not always tell us individual unread keys. The
+        // chat-level unreadCount remains authoritative until individual READ
+        // events arrive.
         changed.add(jid);
       }
 
@@ -189,15 +244,32 @@ export function createMessageManager(ctx) {
            */
           if (Number.isFinite(n)) {
             const delta = Math.floor(n);
+
             if (delta === 0) {
-              r.unread = 0;
+              // This is the strongest signal that WhatsApp has marked the
+              // chat read. Clear the individual unread keys as well.
+              clearUnreadMessages(update.id);
             } else if (delta < 0) {
-              r.unread = Math.max(0, r.unread + delta);
+              // Consume exactly N tracked unread messages when possible.
+              const set = unreadMessageIds.get(update.id);
+              let remaining = Math.abs(delta);
+              if (set && set.size) {
+                for (const msgId of set) {
+                  if (!remaining) break;
+                  set.delete(msgId);
+                  remaining--;
+                }
+                r.unread = set.size;
+              } else {
+                r.unread = Math.max(0, r.unread + delta);
+              }
             } else {
               r.unread = Math.max(0, r.unread + delta);
             }
           }
-          if (update.markedAsUnread && r.unread === 0) r.unread = 1;
+          if (update.markedAsUnread && r.unread === 0) {
+            r.unread = 1;
+          }
         }
         changed.push(update.id);
       }
@@ -209,11 +281,81 @@ export function createMessageManager(ctx) {
       for (const msg of payload.messages || []) {
         const jid = msg?.key?.remoteJid;
         const id = msg?.key?.id;
+        rememberMessage(msg);
         if (!isGroupJid(jid) || !id || !markSeen(jid, id)) continue;
-        ensureCount(jid).total++;
+
+        const r = ensureCount(jid);
+        r.total++;
+
+        // Only newly received incoming notifications become unread here.
+        // History/sync messages are not blindly counted as unread.
+        if (payload.type === 'notify' && !msg?.key?.fromMe) {
+          addUnreadMessage(jid, id);
+        }
         changed.add(jid);
       }
       touch([...changed]);
+    });
+
+    // Opening a chat is the authoritative way to mark messages read. As a
+    // defensive fallback, reacting to an incoming message also proves that
+    // the message was opened, so reconcile that individual message if the
+    // companion device only sends the reaction event.
+    sock.ev.on('messages.reaction', (reactions = []) => {
+      const changed = new Set();
+      for (const item of reactions) {
+        const jid = item?.key?.remoteJid;
+        const id = item?.key?.id;
+        if (!isGroupJid(jid) || !id || item?.key?.fromMe) continue;
+        if (markMessageRead(jid, id)) changed.add(jid);
+      }
+      if (changed.size) touch([...changed]);
+    });
+
+    sock.ev.on('messages.update', (updates = []) => {
+      const changed = new Set();
+
+      for (const item of updates) {
+        const jid = item?.key?.remoteJid;
+        const id = item?.key?.id;
+        const status = item?.update?.status;
+
+        if (!isGroupJid(jid) || !id || item?.key?.fromMe) continue;
+
+        // Baileys uses the protobuf READ status for messages that have
+        // actually been opened/read on the linked WhatsApp client.
+        const isRead =
+          status === WAMessageStatus.READ ||
+          status === Number(WAMessageStatus.READ) ||
+          String(status).toUpperCase() === 'READ';
+
+        if (!isRead) continue;
+
+        const readKey = keyOf(jid, id);
+        if (readSeen.has(readKey)) continue;
+        readSeen.add(readKey);
+
+        // Prefer the individual message set. This makes Seen move by exactly
+        // the messages that WhatsApp reports as read.
+        if (markMessageRead(jid, id)) {
+          changed.add(jid);
+        } else {
+          // If the message was created before this process started, we may
+          // not have its individual key. Still reconcile the chat counter.
+          const r = ensureCount(jid);
+          if (r.unread > 0) {
+            r.unread = Math.max(0, r.unread - 1);
+            changed.add(jid);
+          }
+        }
+      }
+
+      if (changed.size) touch([...changed]);
+
+      if (readSeen.size > 150000) {
+        const first = readSeen.values().next().value;
+        if (first) readSeen.delete(first);
+      }
     });
 
     sock.ev.on('messages.delete', (payload) => {
@@ -341,14 +483,17 @@ export function createMessageManager(ctx) {
   function cancelJob(id) {
     const job = jobs.get(id);
     if (!job) return false;
-    if (['finished', 'cancelled', 'error'].includes(job.state)) return false;
+    if (['finished', 'cancelled', 'error', 'cancelling'].includes(job.state)) return false;
     job.cancelRequested = true;
-    return true;
+    job.state = 'cancelling';
+    send('send-progress', { job: serializeJob(job) });
+    return serializeJob(job);
   }
 
   function removeGroup(id) {
     chats.delete(id);
     counts.delete(id);
+    lastMessages.delete(id);
     for (const k of [...seen]) if (k.startsWith(`${id}::`)) seen.delete(k);
     touch([id]);
   }
@@ -362,6 +507,7 @@ export function createMessageManager(ctx) {
     cancelJob,
     removeGroup,
     _t: { chats, counts, seen, clients, allRows, unreadRows },
+    getLastMessages,
   };
 }
 
@@ -395,10 +541,10 @@ export function registerMessageRoutes(app, requireAuth, needWA, getMessageManage
     res.json({ job });
   });
 
-  app.post('/api/messages/jobs/:id/cancel', requireAuth, needWA, (req, res) => {
-    const ok = getMessageManager(req.user.userId).cancelJob(req.params.id);
-    if (!ok) return res.status(400).json({ error: 'Job cannot be cancelled.' });
-    res.json({ ok: true });
+  app.post('/api/messages/jobs/:id/cancel', requireAuth, (req, res) => {
+    const job = getMessageManager(req.user.userId).cancelJob(req.params.id);
+    if (!job) return res.status(400).json({ error: 'Job cannot be cancelled.' });
+    res.json({ ok: true, job });
   });
 
   app.get('/api/messages/stream', requireAuth, (req, res) => {
@@ -418,42 +564,4 @@ export function registerMessageRoutes(app, requireAuth, needWA, getMessageManage
       manager._t.clients.delete(res);
     });
   });
-}
-
-export function registerGroupDeleterRoutes(app, requireAuth, needWA, getWA, getMessageManager) {
-  app.post('/api/group-deleter/delete', requireAuth, needWA, async (req, res) => {
-    const wa = getWA(req.user.userId);
-    const ids = [...new Set(Array.isArray(req.body?.groupIds) ? req.body.groupIds.map(String) : [])];
-    const groups = wa.groupCache?.data || {};
-    if (!ids.length) return res.status(400).json({ error: 'Please select at least one group.' });
-    if (ids.length > maxSafeGroups()) return res.status(400).json({ error: `You can process no more than ${maxSafeGroups()} groups at once.` });
-
-    const results = [];
-    for (const id of ids) {
-      const g = groups[id];
-      if (!g) {
-        results.push({ id, name: id, status: 'failed', error: 'Group not found' });
-        continue;
-      }
-      try {
-        await wa.sock.groupLeave(id);
-        delete groups[id];
-        results.push({ id, name: g.subject || id, status: 'success' });
-        getMessageManager(req.user.userId)?.removeGroup(id);
-      } catch (e) {
-        results.push({ id, name: g.subject || id, status: 'failed', error: e?.message || String(e) });
-      }
-    }
-    wa.groupCache.at = Date.now();
-    res.json({
-      ok: true,
-      results,
-      success: results.filter((x) => x.status === 'success').length,
-      failed: results.filter((x) => x.status === 'failed').length,
-    });
-  });
-}
-
-function maxSafeGroups() {
-  return Math.max(1, Number(process.env.MAX_GROUP_DELETE_GROUPS || 100));
 }

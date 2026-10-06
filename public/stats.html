@@ -2596,6 +2596,7 @@ $('tagsList').onclick = () => {
       'waTagsImport',
       JSON.stringify(payload)
     );
+    sessionStorage.setItem('waTagsOpenedFromStats', '1');
 
     window.location.href = '/tags-list.html';
 

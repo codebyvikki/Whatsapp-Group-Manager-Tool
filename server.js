@@ -17,7 +17,7 @@ async function getSharp() {
 import fs from 'fs';
 import { MongoClient, Binary } from 'mongodb';
 import { createStats, registerStatsRoutes } from './stats.js';
-import { createMessageManager, registerMessageRoutes, registerGroupDeleterRoutes } from './message-manager.js';
+import { createMessageManager, registerMessageRoutes } from './message-manager.js';
 import makeWASocket, {
   useMultiFileAuthState,
   DisconnectReason,
@@ -184,6 +184,7 @@ async function getDb() {
       await Promise.all([
         db.collection('users').createIndex({ usernameKey: 1 }, { unique: true }),
         db.collection('lists').createIndex({ userId: 1, name: 1 }, { unique: true }),
+        db.collection('groupDeleterLists').createIndex({ userId: 1, name: 1 }, { unique: true }),
         db.collection('tagBackups').createIndex({ userId: 1, name: 1 }, { unique: true }),
         db.collection('sessions').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
         db.collection('bulkJobs').createIndex({ userId: 1, type: 1, state: 1, updatedAt: -1 }),
@@ -220,6 +221,7 @@ let appData = {
   codes: {},
   codesByUser: {},
   listsByUser: {},
+  groupDeleterListsByUser: {},
   tagBackupsByUser: {},
   creatorDailyByUser: {},
   creatorHistoryByUser: {}
@@ -234,6 +236,7 @@ async function loadData() {
         codes: doc?.codes || {},
         codesByUser: doc?.codesByUser || {},
         listsByUser: doc?.listsByUser || {},
+        groupDeleterListsByUser: doc?.groupDeleterListsByUser || {},
         tagBackupsByUser: doc?.tagBackupsByUser || {},
         creatorDailyByUser: doc?.creatorDailyByUser || {},
         creatorHistoryByUser: doc?.creatorHistoryByUser || {}
@@ -246,6 +249,7 @@ async function loadData() {
         codes: j.codes || {},
         codesByUser: j.codesByUser || {},
         listsByUser: j.listsByUser || {},
+        groupDeleterListsByUser: j.groupDeleterListsByUser || {},
         tagBackupsByUser: j.tagBackupsByUser || {},
         creatorDailyByUser: j.creatorDailyByUser || {},
         creatorHistoryByUser: j.creatorHistoryByUser || {}
@@ -254,7 +258,7 @@ async function loadData() {
     }
   } catch (e) {
     console.error('[storage] loadData:', e.message);
-    appData = { codes: {}, codesByUser: {}, listsByUser: {}, tagBackupsByUser: {}, creatorDailyByUser: {}, creatorHistoryByUser: {}, _legacyLists: [] };
+    appData = { codes: {}, codesByUser: {}, listsByUser: {}, groupDeleterListsByUser: {}, tagBackupsByUser: {}, creatorDailyByUser: {}, creatorHistoryByUser: {}, _legacyLists: [] };
   }
 }
 
@@ -264,6 +268,7 @@ async function saveData() {
     codes: appData.codes || {},
     codesByUser: appData.codesByUser || {},
     listsByUser: appData.listsByUser || {},
+    groupDeleterListsByUser: appData.groupDeleterListsByUser || {},
     tagBackupsByUser: appData.tagBackupsByUser || {},
     creatorDailyByUser: appData.creatorDailyByUser || {},
     creatorHistoryByUser: appData.creatorHistoryByUser || {}
@@ -396,12 +401,15 @@ async function deleteUser(id) {
   if (d) {
     await d.collection('users').deleteOne({ _id: id, role: 'user' });
     await d.collection('lists').deleteMany({ userId: id });
+    await d.collection('groupDeleterLists').deleteMany({ userId: id });
     await d.collection('tagBackups').deleteMany({ userId: id });
     return;
   }
 
   const users = readJson(USERS_FILE, []);
   writeJsonAtomic(USERS_FILE, users.filter((u) => !(u._id === id && u.role === 'user')));
+  appData.groupDeleterListsByUser = appData.groupDeleterListsByUser || {};
+  delete appData.groupDeleterListsByUser[id];
   appData.tagBackupsByUser = appData.tagBackupsByUser || {};
   delete appData.tagBackupsByUser[id];
   await saveData();
@@ -798,6 +806,31 @@ async function useMongoAuthState(col, ownerId) {
   const credsDoc = await col.findOne({ ownerId, _id: `${ownerId}::creds` });
   const creds = credsDoc ? JSON.parse(credsDoc.value, BufferJSON.reviver) : initAuthCreds();
 
+  // Baileys uses creds.myAppStateKeyId for account-level chat patches
+  // (delete chat, archive, mark read, etc.). Older/custom auth stores can
+  // contain the actual app-state-sync-key but miss this pointer, which makes
+  // chatModify() fail with "App state key not present!". Recover it from
+  // the persisted key store when possible.
+  if (!creds.myAppStateKeyId) {
+    const keyPrefix = `${ownerId}::app-state-sync-key-`;
+    const keyDoc = await col.findOne(
+      { ownerId, _id: { $regex: `^${keyPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}` } },
+      { projection: { _id: 1 } }
+    );
+    if (keyDoc?._id) {
+      const prefix = `${keyPrefix}`;
+      const recovered = String(keyDoc._id).slice(prefix.length);
+      if (recovered) {
+        creds.myAppStateKeyId = recovered;
+        await col.updateOne(
+          { ownerId, _id: `${ownerId}::creds` },
+          { $set: { ownerId, value: JSON.stringify(creds, BufferJSON.replacer) } },
+          { upsert: true }
+        );
+      }
+    }
+  }
+
   return {
     state: {
       creds,
@@ -821,6 +854,24 @@ async function useMongoAuthState(col, ownerId) {
               )
             )
           );
+
+          // Whenever WhatsApp sends a new app-state sync key, remember the
+          // newest key id in creds as Baileys expects. This keeps account-level
+          // chat patches working across reconnects/restarts.
+          const appStateKeys = data['app-state-sync-key'];
+          if (appStateKeys) {
+            const ids = Object.entries(appStateKeys)
+              .filter(([, value]) => value != null)
+              .map(([id]) => id);
+            if (ids.length) {
+              creds.myAppStateKeyId = ids[ids.length - 1];
+              await col.updateOne(
+                { ownerId, _id: `${ownerId}::creds` },
+                { $set: { ownerId, value: JSON.stringify(creds, BufferJSON.replacer) } },
+                { upsert: true }
+              );
+            }
+          }
         }
       }
     },
@@ -848,6 +899,26 @@ async function startWA(userId) {
     const auth = d
       ? await useMongoAuthState(d.collection('auth'), wa.userId)
       : await useMultiFileAuthState(userAuthPath(wa.userId));
+
+    // Recover a missing app-state key pointer for legacy file-based sessions.
+    // Mongo sessions are recovered inside useMongoAuthState above.
+    if (!auth.state.creds.myAppStateKeyId && !d) {
+      try {
+        const files = fs.readdirSync(userAuthPath(wa.userId));
+        const candidates = files
+          .filter((name) => name.startsWith('app-state-sync-key-') && name.endsWith('.json'))
+          .map((name) => name.slice('app-state-sync-key-'.length, -'.json'.length).replace(/__/g, '/'))
+          .filter(Boolean);
+        for (const candidate of candidates) {
+          const found = await auth.state.keys.get('app-state-sync-key', [candidate]);
+          if (found?.[candidate]) {
+            auth.state.creds.myAppStateKeyId = candidate;
+            await auth.saveCreds();
+            break;
+          }
+        }
+      } catch {}
+    }
 
     const { version } = await fetchLatestBaileysVersion();
     const currentSocket = makeWASocket({
@@ -3403,6 +3474,202 @@ app.post('/api/lists/delete', requireAuth, async (req, res) => {
   res.json({ lists });
 });
 
+/* ---------- Group Exiter: isolated per-user saved lists ----------
+   Historical storage names are retained only as a data-compatibility layer so
+   existing saved selections survive the UI/tool rename. The action itself is
+   EXIT ONLY: it never performs WhatsApp chat deletion and never removes chats. */
+async function saveGroupExiterLists(userId, lists) {
+  const clean = Array.isArray(lists) ? lists : [];
+  const d = await getDb();
+  if (d) {
+    await d.collection('groupDeleterLists').deleteMany({ userId });
+    if (clean.length) {
+      await d.collection('groupDeleterLists').insertMany(
+        clean.map((l) => ({ userId, name: String(l.name), ids: Array.isArray(l.ids) ? l.ids : [] }))
+      );
+    }
+    return;
+  }
+  appData.groupDeleterListsByUser[userId] = clean;
+  await saveData();
+}
+
+async function getGroupExiterLists(userId) {
+  const d = await getDb();
+  if (d) {
+    return d.collection('groupDeleterLists')
+      .find({ userId }, { projection: { _id: 0, userId: 0 } })
+      .sort({ name: 1 })
+      .toArray();
+  }
+  return Array.isArray(appData.groupDeleterListsByUser?.[userId])
+    ? appData.groupDeleterListsByUser[userId]
+    : [];
+}
+
+app.get('/api/group-exiter/lists', requireAuth, async (req, res) => {
+  try { res.json({ lists: await getGroupExiterLists(req.user.userId) }); }
+  catch { res.status(500).json({ error: 'Could not load Group Exiter lists' }); }
+});
+
+app.post('/api/group-exiter/lists', requireAuth, async (req, res) => {
+  const name = String(req.body?.name || '').trim();
+  const ids = [...new Set(Array.isArray(req.body?.ids) ? req.body.ids.map(String).filter(x => x.endsWith('@g.us')) : [])];
+  if (!name || name.length > 80 || !ids.length) return res.status(400).json({ error: 'Enter a valid list name and select at least one group.' });
+  if (ids.length > 500) return res.status(400).json({ error: 'A list can contain no more than 500 groups.' });
+  const lists = await getGroupExiterLists(req.user.userId);
+  const i = lists.findIndex(l => l.name === name);
+  if (i >= 0) lists[i] = { name, ids };
+  else lists.push({ name, ids });
+  await saveGroupExiterLists(req.user.userId, lists);
+  res.json({ lists });
+});
+
+app.post('/api/group-exiter/lists/delete', requireAuth, async (req, res) => {
+  const name = String(req.body?.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'List name is required.' });
+  const lists = (await getGroupExiterLists(req.user.userId)).filter(l => l.name !== name);
+  await saveGroupExiterLists(req.user.userId, lists);
+  res.json({ lists });
+});
+
+/* ---------- Group Exiter ---------- */
+
+const GROUP_EXIT_MAX_GROUPS = Math.max(1, Math.min(500, Number(process.env.GROUP_EXIT_MAX_GROUPS || 500)));
+const GROUP_EXIT_CONCURRENCY = Math.max(1, Math.min(3, Number(process.env.GROUP_EXIT_CONCURRENCY || 3)));
+const GROUP_EXIT_START_GAP_MS = Math.max(100, Number(process.env.GROUP_EXIT_START_GAP_MS || 180));
+const GROUP_EXIT_RETRIES = Math.max(0, Math.min(3, Number(process.env.GROUP_EXIT_RETRIES || 2)));
+
+function isGroupExitRateError(message) {
+  return /rate|overlimit|429|too many|throttl|temporar/i.test(String(message || ''));
+}
+
+async function exitGroupWithRetry(wa, jid) {
+  let lastError = null;
+
+  for (let attempt = 0; attempt <= GROUP_EXIT_RETRIES; attempt++) {
+    if (!wa?.sock || wa.state !== 'connected') {
+      throw new Error('WhatsApp is not connected');
+    }
+
+    try {
+      // EXIT ONLY. Deliberately no chatModify/delete call.
+      // Share the project's WhatsApp concurrency limiter with other bulk tools.
+      await withWALinkLimit(wa, () => wa.sock.groupLeave(jid));
+      return;
+    } catch (e) {
+      lastError = e;
+      const message = errText(e);
+
+      if (attempt >= GROUP_EXIT_RETRIES || !isGroupExitRateError(message)) {
+        throw e;
+      }
+
+      await sleep(Math.min(2500, 500 * (attempt + 1)));
+    }
+  }
+
+  throw lastError || new Error('Could not exit group');
+}
+
+async function runGroupExitWorkers(wa, items) {
+  let cursor = 0;
+
+  async function worker() {
+    while (true) {
+      const index = cursor++;
+      if (index >= items.length) return;
+
+      if (index > 0) await sleep(GROUP_EXIT_START_GAP_MS);
+
+      const item = items[index];
+      try {
+        await exitGroupWithRetry(wa, item.id);
+        item.status = 'success';
+        item.error = null;
+      } catch (e) {
+        item.status = 'failed';
+        item.error = errText(e);
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from(
+      { length: Math.min(GROUP_EXIT_CONCURRENCY, items.length) },
+      () => worker()
+    )
+  );
+}
+
+app.post('/api/group-exiter/exit', requireAuth, needWA, async (req, res) => {
+  const ids = [...new Set(
+    Array.isArray(req.body?.groupIds)
+      ? req.body.groupIds.map(String).map(x => x.trim()).filter(x => x.endsWith('@g.us'))
+      : []
+  )];
+
+  if (!ids.length) return res.status(400).json({ error: 'Select at least one group.' });
+  if (ids.length > GROUP_EXIT_MAX_GROUPS) {
+    return res.status(400).json({ error: `Please exit no more than ${GROUP_EXIT_MAX_GROUPS} groups at once.` });
+  }
+
+  const wa = getWA(req.user.userId);
+  const jobKey = activeJobKey(req.user.userId, 'group-exit');
+
+  // Prevent two exit batches for the same WhatsApp account from racing.
+  if (activeBulkJobs.has(jobKey)) {
+    return res.status(409).json({ error: 'A Group Exit job is already running. Please wait for it to finish.' });
+  }
+
+  activeBulkJobs.add(jobKey);
+
+  try {
+    let all = {};
+    try {
+      // Fresh participant snapshot prevents stale/forged IDs from being acted on.
+      all = await getGroups(wa, true);
+    } catch (e) {
+      return res.status(503).json({ error: errText(e) });
+    }
+
+    const validIds = ids.filter(jid => Object.prototype.hasOwnProperty.call(all, jid));
+    const rejected = ids.filter(jid => !Object.prototype.hasOwnProperty.call(all, jid));
+
+    const results = validIds.map(jid => ({
+      id: jid,
+      name: String(all[jid]?.subject || jid),
+      status: 'pending'
+    }));
+
+    for (const jid of rejected) {
+      results.push({
+        id: jid,
+        name: jid,
+        status: 'failed',
+        error: 'Group is not in the currently participating-group list.'
+      });
+    }
+
+    await runGroupExitWorkers(wa, results.filter(x => x.status === 'pending'));
+
+    // Remove successfully exited groups from the local cache immediately.
+    if (wa.groupCache?.data) {
+      for (const result of results) {
+        if (result.status === 'success') delete wa.groupCache.data[result.id];
+      }
+      wa.groupCache.at = Date.now();
+    }
+
+    const success = results.filter(x => x.status === 'success').length;
+    const failed = results.filter(x => x.status === 'failed').length;
+
+    res.json({ ok: true, success, failed, results });
+  } finally {
+    activeBulkJobs.delete(jobKey);
+  }
+});
+
 /* ---------- Per-user saved Tags List backups ---------- */
 
 function cleanTagBackup(value) {
@@ -3552,18 +3819,9 @@ app.post('/api/logout-wa', requireAuth, async (req, res) => {
 
 registerStatsRoutes(app, requireAuth, needWA, getStats);
 
-/* ---------- Message Manager + Group Deleter ---------- */
+/* ---------- Message Manager + Group Tools ---------- */
 
 registerMessageRoutes(app, requireAuth, needWA, (userId) => getWA(userId).messageManager);
-registerGroupDeleterRoutes(
-  app,
-  requireAuth,
-  needWA,
-  (userId) => getWA(userId),
-  (userId) => getWA(userId).messageManager
-);
-
-
 /* ---------- Dashboard / Page Routes ---------- */
 
 app.get('/', (req, res) => {
@@ -3585,7 +3843,7 @@ app.get('/group-dp.html', (req, res) => {
 app.get('/member-remover.html', (req, res) => { res.sendFile('member-remover.html', { root: 'public' }); });
 
 app.get('/message-manager.html', (req, res) => { res.sendFile('message-manager.html', { root: 'public' }); });
-app.get('/group-deleter.html', (req, res) => { res.sendFile('group-deleter.html', { root: 'public' }); });
+app.get('/group-exiter.html', (req, res) => { res.sendFile('group-exiter.html', { root: 'public' }); });
 
 app.get('/group-description.html', (req, res) => {
   res.sendFile('group-description.html', { root: 'public' });
