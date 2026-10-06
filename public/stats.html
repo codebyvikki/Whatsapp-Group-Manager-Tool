@@ -1127,6 +1127,13 @@ button.small {
   box-shadow: 0 5px 14px rgba(18,140,85,.18);
 }
 
+
+/* Mobile viewport guard */
+@media(max-width:700px){
+  html,body{max-width:100%;overflow-x:hidden}
+  img,canvas,video{max-width:100%}
+  input,select,textarea,button{max-width:100%}
+}
 </style>
 </head>
 

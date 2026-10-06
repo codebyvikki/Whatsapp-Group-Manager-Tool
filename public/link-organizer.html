@@ -1112,7 +1112,14 @@
     }
   }
 
-.cancel-operation{border-color:#e7b7b1!important;background:#fff!important;color:var(--danger)!important}.cancel-operation:hover:not(:disabled){background:var(--danger-soft)!important;box-shadow:none!important}</style>
+.cancel-operation{border-color:#e7b7b1!important;background:#fff!important;color:var(--danger)!important}.cancel-operation:hover:not(:disabled){background:var(--danger-soft)!important;box-shadow:none!important}
+/* Mobile viewport guard */
+@media(max-width:700px){
+  html,body{max-width:100%;overflow-x:hidden}
+  img,canvas,video{max-width:100%}
+  input,select,textarea,button{max-width:100%}
+}
+</style>
 </head>
 <body>
 <main>

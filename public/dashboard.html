@@ -1640,6 +1640,13 @@ body.connection-page-active .account-bar #headerStatus{
   display:none !important;
 }
 
+
+/* Mobile viewport guard */
+@media(max-width:700px){
+  html,body{max-width:100%;overflow-x:hidden}
+  img,canvas,video{max-width:100%}
+  input,select,textarea,button{max-width:100%}
+}
 </style>
 </head>
 <body>

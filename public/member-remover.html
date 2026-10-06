@@ -18,6 +18,13 @@ button.primary{min-height:42px;padding:10px 15px;border:0;border-radius:10px;bac
 /* Inactive tabs must never turn green on hover: only their text darkens. */
 .mode-tabs button:not(.on):hover:not(:disabled){background:transparent!important;color:var(--ink)!important;box-shadow:none!important}
 @media(max-width:640px){body{padding:15px 12px 35px}section{padding:16px}.app-header{align-items:flex-start}.two{grid-template-columns:1fr}.mode-tabs{width:100%}.mode-tabs button{flex:1;padding-left:7px;padding-right:7px}.account-bar{gap:8px}.header-btn{padding:8px 12px}}
+
+/* Mobile viewport guard */
+@media(max-width:700px){
+  html,body{max-width:100%;overflow-x:hidden}
+  img,canvas,video{max-width:100%}
+  input,select,textarea,button{max-width:100%}
+}
 </style>
 </head>
 <body>

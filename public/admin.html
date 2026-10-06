@@ -67,6 +67,13 @@ tr:last-child td{border-bottom:0}
 .login .icon{font-size:2rem;margin-bottom:8px}
 @media(max-width:800px){.grid{grid-template-columns:1fr}.stats{grid-template-columns:1fr 1fr}header{align-items:flex-start}.top-actions{flex-wrap:wrap;justify-content:flex-end}}
 @media(max-width:520px){main{width:min(100% - 18px,1050px);margin-top:16px}.card{padding:16px}.stats{grid-template-columns:1fr}header{flex-direction:column}.top-actions{width:100%;justify-content:flex-start}}
+
+/* Mobile viewport guard */
+@media(max-width:700px){
+  html,body{max-width:100%;overflow-x:hidden}
+  img,canvas,video{max-width:100%}
+  input,select,textarea,button{max-width:100%}
+}
 </style>
 </head>
 <body>
