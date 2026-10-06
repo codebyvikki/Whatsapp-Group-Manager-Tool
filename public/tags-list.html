@@ -800,7 +800,7 @@ body{
 <body>
 
 <div class="tag-page-top">
-    <a class="tag-nav-btn" href="/stats.html">📊 Live Stats</a>
+    <a id="tagSourceNavBtn" class="tag-nav-btn" href="/stats.html">📊 Live Stats</a>
     <a class="tag-nav-btn" href="/dashboard.html">🏠 Dashboard</a>
 </div>
 
@@ -1118,6 +1118,15 @@ try {
     }
 } catch(error){
     console.error("[tags-list] import failed:", error);
+}
+
+/* Keep the Tags page navigation tied to the section that opened it.
+   Message Manager Tags must never show a misleading Live Stats switch.
+   Live Stats Tags keep their existing Live Stats + Dashboard navigation. */
+const tagSourceNavBtn = document.getElementById('tagSourceNavBtn');
+if(tagSourceNavBtn && tagsListSource === 'message-manager'){
+    tagSourceNavBtn.href = '/message-manager.html';
+    tagSourceNavBtn.textContent = '💬 Message Manager';
 }
 
 const TAGS_DATA_KEY = tagsListSource === 'message-manager'

@@ -15,7 +15,7 @@
 .icon-btn{width:34px;height:34px;flex:0 0 34px;border:1px solid var(--line);border-radius:9px;background:var(--surface);color:var(--ink);font-size:20px;line-height:1}
 .modal-label{font-size:.8rem;font-weight:800}
 .modal-input{width:100%;min-height:44px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--ink);font-size:1rem}
-.modal-input:focus{outline:3px solid rgba(18,140,85,.16);border-color:var(--brand)}
+.modal-input:focus{outline:3px solid rgba(18,140,85,.16);border-color:var(--brand)}.modal-check{display:flex;align-items:center;gap:9px;margin-top:12px;font-size:.92rem;font-weight:700;cursor:pointer}.modal-check input{width:17px;height:17px;accent-color:var(--brand);cursor:pointer}
 .modal-hint{padding:9px 11px;border-radius:9px;background:var(--brand-soft);color:var(--brand-dark);font-size:.77rem;font-weight:700}
 .modal-error{min-height:18px;color:var(--danger);font-size:.78rem}
 .modal-actions{display:flex;justify-content:flex-end;gap:8px}
@@ -119,7 +119,11 @@
       </div>
       <label class="modal-label" for="messageRequirement">Minimum messages required</label>
       <input id="messageRequirement" class="modal-input" type="number" min="1" step="1" inputmode="numeric" placeholder="e.g. 5">
-      <div class="modal-hint" id="messageTagsModeHint">Using Total Messages.</div>
+      <label class="modal-check" for="messageTagsWithMessages">
+        <input id="messageTagsWithMessages" type="checkbox">
+        <span>Do you want tags with messages?</span>
+      </label>
+      <div class="modal-hint" id="messageTagsModeHint">By default, tags will be created empty. Turn this on to include the message count in each tag.</div>
       <div class="modal-error" id="messageTagsError"></div>
       <div class="modal-actions">
         <button class="ghost small" id="cancelMessageTags" type="button">Cancel</button>
@@ -191,11 +195,17 @@ $('csvList').onclick=()=>{const escCsv=v=>{v=String(v??'');return /[",\n]/.test(
 function openMessageTagsModal(){
   $('messageTagsError').textContent='';
   $('messageRequirement').value='';
-  const metric='Total Messages';
-  $('messageTagsModeHint').textContent='Using Total Messages. A group is included only when its total message count is at least the requirement.';
+  $('messageTagsWithMessages').checked=false;
+  $('messageTagsModeHint').textContent='By default, tags will be created empty. Turn this on to include the message count in each tag.';
   $('messageTagsModal').hidden=false;
   setTimeout(()=>$('messageRequirement').focus(),30);
 }
+function updateMessageTagsModeHint(){
+  $('messageTagsModeHint').textContent = $('messageTagsWithMessages').checked
+    ? 'Tags will include the group message count.'
+    : 'Tags will be created empty; the message count will not be added to the tags.';
+}
+$('messageTagsWithMessages').onchange=updateMessageTagsModeHint;
 function closeMessageTagsModal(){ $('messageTagsModal').hidden=true; }
 $('messageTagsList').onclick=openMessageTagsModal;
 $('closeMessageTags').onclick=closeMessageTagsModal;
@@ -211,6 +221,7 @@ async function createMessageTags(){
     return;
   }
   const btn=$('createMessageTags');
+  const includeMessages=$('messageTagsWithMessages').checked;
   btn.disabled=true;
   $('messageTagsError').textContent='';
   try{
@@ -221,14 +232,14 @@ async function createMessageTags(){
       .filter(r=>Math.max(0,Number(r?.[metric])||0)>=requirement)
       .map(r=>({
         name:String(r.name||''),
-        members:Math.max(0,Number(r?.[metric])||0),
+        members:includeMessages ? Math.max(0,Number(r?.[metric])||0) : 0,
         country:''
       }));
     if(!eligible.length){
       throw new Error(`No groups have reached ${requirement} total messages yet.`);
     }
     sessionStorage.setItem('waMessageTagsImport',JSON.stringify({
-      version:1, source:'message-manager', metric, requirement, createdAt:Date.now(), groups:eligible
+      version:2, source:'message-manager', metric, requirement, includeMessages, createdAt:Date.now(), groups:eligible
     }));
     sessionStorage.setItem('waMessageTagsOpened','1');
     window.location.href='/tags-list.html';
