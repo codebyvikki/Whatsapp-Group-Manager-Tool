@@ -1097,33 +1097,50 @@ const defaults=[{"name":"Booking 限时推广 BF2","members":0,"country":"USA"},
    Receives the current Live Stats tab (Pending / Invite links / Added / Total members)
    through same-origin sessionStorage, then hands the data to the existing Tags UI. */
 let importedTagPayload = null;
+let tagsListSource = 'stats';
 try {
-    const rawImport = sessionStorage.getItem("waTagsImport");
-    if(rawImport){
-        const parsed = JSON.parse(rawImport);
-        if(parsed && Array.isArray(parsed.groups) && parsed.groups.length){
-            importedTagPayload = parsed;
-            sessionStorage.removeItem("waTagsImport");
-        }
+    const messageRaw = sessionStorage.getItem("waMessageTagsImport");
+    const statsRaw = sessionStorage.getItem("waTagsImport");
+    const messagePayload = messageRaw ? JSON.parse(messageRaw) : null;
+    const statsPayload = statsRaw ? JSON.parse(statsRaw) : null;
+
+    /* Message Manager Tags use a completely separate dataset from Live Stats Tags. */
+    if(messagePayload && Array.isArray(messagePayload.groups) && messagePayload.groups.length){
+        importedTagPayload = messagePayload;
+        tagsListSource = 'message-manager';
+        sessionStorage.removeItem("waMessageTagsImport");
+        sessionStorage.removeItem("waMessageTagsOpened");
+    }else if(statsPayload && Array.isArray(statsPayload.groups) && statsPayload.groups.length){
+        importedTagPayload = statsPayload;
+        tagsListSource = 'stats';
+        sessionStorage.removeItem("waTagsImport");
+        sessionStorage.removeItem("waTagsOpenedFromStats");
     }
 } catch(error){
     console.error("[tags-list] import failed:", error);
 }
+
+const TAGS_DATA_KEY = tagsListSource === 'message-manager'
+    ? 'groupManagerMessageTagsData'
+    : 'groupManagerData';
+const tagStorageKey = (key) =>
+    tagsListSource === 'message-manager' ? `messageTags::${key}` : key;
+
 
 let data = importedTagPayload
     ? importedTagPayload.groups.map(function(g){
         return {
             name: String(g.name || ""),
             members: Number(g.members || 0),
-            country: "",
-            color: localStorage.getItem("tagColor") || "#006b3c"
+            country: String(g.country || ""),
+            color: String(g.color || localStorage.getItem(tagStorageKey("tagColor")) || "#006b3c")
         };
     })
-    : (JSON.parse(localStorage.getItem("groupManagerData")||"null")||defaults);
+    : (JSON.parse(localStorage.getItem(TAGS_DATA_KEY)||"null")||(tagsListSource === 'message-manager' ? [] : defaults));
 
 if(importedTagPayload){
-    /* Keep the imported list as the normal editable Tags List dataset. */
-    localStorage.setItem("groupManagerData", JSON.stringify(data));
+    /* Persist only inside this source's namespace. */
+    localStorage.setItem(TAGS_DATA_KEY, JSON.stringify(data));
 }
 let editIndex=-1;
 let duplicatePending=null;
@@ -1134,8 +1151,8 @@ let activeBackupName = '';
 let backupReady = false;
 let backupAutosaveTimer = null;
 let currentUserId = '';
-const LOCAL_SAVE_PREFIX = 'tagsBrowserSaved::';
-const LOCAL_BACKUP_NAME = '__browser_saved__';
+const LOCAL_SAVE_PREFIX = tagsListSource === 'message-manager' ? 'messageBrowserSaved::' : 'tagsBrowserSaved::';
+const LOCAL_BACKUP_NAME = tagsListSource === 'message-manager' ? '__message_browser_saved__' : '__browser_saved__';
 
 const apiJSON = async function(url, options){
     const response = await fetch(url, Object.assign({
@@ -1160,7 +1177,7 @@ function buildTagSnapshot(){
                 name: String(g.name || ''),
                 members: Number(g.members || 0),
                 country: String(g.country || ''),
-                color: String(g.color || localStorage.getItem('tagColor') || '#006b3c')
+                color: String(g.color || localStorage.getItem(tagStorageKey('tagColor')) || '#006b3c')
             };
         }),
         listTitle: String($('listTitle')?.value || 'VALID LIST'),
@@ -1168,7 +1185,7 @@ function buildTagSnapshot(){
         profileName: String($('profileName')?.textContent || ''),
         profileTagline: String($('profileTagline')?.textContent || ''),
         profileLogo: String($('profileLogo')?.getAttribute('src') || ''),
-        tagColor: String(localStorage.getItem('tagColor') || '#006b3c')
+        tagColor: String(localStorage.getItem(tagStorageKey('tagColor')) || '#006b3c')
     };
 }
 
@@ -1195,13 +1212,13 @@ function applyTagSnapshot(snapshot){
         $('profileLogo').style.display = 'none';
         $('profileLogoText').style.display = 'block';
     }
-    localStorage.setItem('groupManagerData', JSON.stringify(data));
-    if(snapshot.listTitle) localStorage.setItem('listTitle', snapshot.listTitle);
-    if(snapshot.country) localStorage.setItem('defaultCountry', snapshot.country);
-    if(snapshot.profileName) localStorage.setItem('profileName', snapshot.profileName);
-    if(snapshot.profileTagline) localStorage.setItem('profileTagline', snapshot.profileTagline);
-    if(snapshot.profileLogo) localStorage.setItem('profileLogo', snapshot.profileLogo);
-    if(snapshot.tagColor) localStorage.setItem('tagColor', snapshot.tagColor);
+    localStorage.setItem(TAGS_DATA_KEY, JSON.stringify(data));
+    if(snapshot.listTitle) localStorage.setItem(tagStorageKey('listTitle'), snapshot.listTitle);
+    if(snapshot.country) localStorage.setItem(tagStorageKey('defaultCountry'), snapshot.country);
+    if(snapshot.profileName) localStorage.setItem(tagStorageKey('profileName'), snapshot.profileName);
+    if(snapshot.profileTagline) localStorage.setItem(tagStorageKey('profileTagline'), snapshot.profileTagline);
+    if(snapshot.profileLogo) localStorage.setItem(tagStorageKey('profileLogo'), snapshot.profileLogo);
+    if(snapshot.tagColor) localStorage.setItem(tagStorageKey('tagColor'), snapshot.tagColor);
     render();
     updateSelectedColor();
     resizeCountryInput();
@@ -1337,20 +1354,29 @@ async function getCurrentUserForTags(){
         const me=await apiJSON('/api/me');
         if(me?.loggedIn && me.user?.id){
             currentUserId=String(me.user.id);
-            localStorage.setItem('tagsLastUserId', currentUserId);
+            localStorage.setItem(tagStorageKey('tagsLastUserId'), currentUserId);
             return currentUserId;
         }
         currentUserId='';
         return '';
     }catch(e){
         // Offline fallback: use the last profile ID only for browser-local data.
-        currentUserId=localStorage.getItem('tagsLastUserId') || '';
+        currentUserId=localStorage.getItem(tagStorageKey('tagsLastUserId')) || '';
         return currentUserId;
     }
 }
 
 async function loadBackups(){
     currentUserId=await getCurrentUserForTags();
+    if(tagsListSource==='message-manager'){
+        tagBackups=[];
+        backupReady=true;
+        renderBackupOptions();
+        $('backupStatus').textContent = readLocalSavedList()
+            ? 'Message Tags browser copy available offline'
+            : 'Message Tags use separate browser storage';
+        return;
+    }
     if(!currentUserId){
         $('backupStatus').textContent='Login required';
         renderBackupOptions();
@@ -1389,6 +1415,23 @@ async function saveBackup(){
 }
 
 async function saveBackupWithName(name){
+    if(tagsListSource==='message-manager'){
+        if(!currentUserId) currentUserId=await getCurrentUserForTags();
+        if(!currentUserId){
+            alert('Please log in to save this Message Tags List in browser storage.');
+            return;
+        }
+        const snapshot=buildTagSnapshot();
+        try{
+            writeLocalSavedList(snapshot);
+            activeBackupName='';
+            renderBackupOptions();
+            $('backupStatus').textContent='Message Tags saved in separate browser storage';
+        }catch(e){
+            alert(e.message || 'Could not save Message Tags List.');
+        }
+        return;
+    }
     if(!currentUserId) currentUserId=await getCurrentUserForTags();
     if(!currentUserId){
         alert('Please log in to save a Tags List backup.');
@@ -1486,7 +1529,7 @@ function queueBackupAutosave(){
 
 const $=id=>document.getElementById(id);
 
-function saveData(){localStorage.setItem("groupManagerData",JSON.stringify(data));queueBackupAutosave()}
+function saveData(){localStorage.setItem(TAGS_DATA_KEY,JSON.stringify(data));queueBackupAutosave()}
 function fmt(n){return Number(n||0).toLocaleString("en-IN")}
 function stats(){
  $("totalGroups").textContent=data.length;
@@ -1527,7 +1570,7 @@ function resizeCountryInput(){
 function editProfile(){
 
     const current =
-        localStorage.getItem("profileName") ||
+        localStorage.getItem(tagStorageKey("profileName")) ||
         $("profileName").textContent ||
         "Vikki";
 
@@ -1556,7 +1599,7 @@ function editProfile(){
 function editTagline(){
 
     const current =
-        localStorage.getItem("profileTagline") ||
+        localStorage.getItem(tagStorageKey("profileTagline")) ||
         $("profileTagline").textContent ||
         "Build on trust, Driven by Results";
 
@@ -1632,16 +1675,36 @@ function uploadProfileLogo(event){
 
 /* LOAD SAVED PROFILE */
 
+function applyTagsSourceUi(){
+    if(tagsListSource!=='message-manager') return;
+    const title=$('listTitle');
+    if(title && (!title.value || title.value==='VALID LIST')) title.value='MESSAGE TAGS LIST';
+    document.querySelectorAll('label').forEach(function(label){
+        const text=String(label.textContent||'').trim();
+        if(text==='Members') label.firstChild.textContent='Messages';
+    });
+    const newMembers=$('newMembers');
+    const editMembers=$('eMembers');
+    if(newMembers) newMembers.placeholder='Messages';
+    if(editMembers){
+        const label=editMembers.closest('label');
+        if(label) label.firstChild.textContent='Messages';
+    }
+    document.querySelectorAll('.label').forEach(function(el){
+        if(String(el.textContent||'').trim()==='Total Members') el.textContent='Total Messages';
+    });
+}
+
 function loadProfile(){
 
     const savedName =
-        localStorage.getItem("profileName");
+        localStorage.getItem(tagStorageKey("profileName"));
 
     const savedTagline =
-        localStorage.getItem("profileTagline");
+        localStorage.getItem(tagStorageKey("profileTagline"));
 
     const savedLogo =
-        localStorage.getItem("profileLogo");
+        localStorage.getItem(tagStorageKey("profileLogo"));
 
     if(savedName){
 
@@ -1692,7 +1755,7 @@ function render(){
 
         d.style.background =
             g.color ||
-            localStorage.getItem("tagColor") ||
+            localStorage.getItem(tagStorageKey("tagColor")) ||
             "#006b3c";
 
         d.title = "Click to edit";
@@ -1794,7 +1857,7 @@ function addGroup(){
         country: country,
 
         color:
-            localStorage.getItem("tagColor") ||
+            localStorage.getItem(tagStorageKey("tagColor")) ||
             "#006b3c"
     };
 
@@ -2004,7 +2067,7 @@ function selectTagColor(color){
     changeAllTagColors(color);
 
     // Save selected color
-    localStorage.setItem("tagColor", color);
+    localStorage.setItem(tagStorageKey("tagColor"), color);
 
     // Update palette selection
     updateSelectedColor();
@@ -2019,7 +2082,7 @@ function selectTagColor(color){
 function updateSelectedColor(){
 
     const currentColor =
-        localStorage.getItem("tagColor") ||
+        localStorage.getItem(tagStorageKey("tagColor")) ||
         "#006b3c";
 
     // Predefined colors ka selected state
@@ -2085,7 +2148,7 @@ function changeAllTagColors(color){
         return;
     }
 
-    localStorage.setItem("tagColor", color);
+    localStorage.setItem(tagStorageKey("tagColor"), color);
 
     data.forEach(function(g){
 
@@ -2110,7 +2173,7 @@ function openEdit(i){
 
     const currentColor =
         data[i].color ||
-        localStorage.getItem("tagColor") ||
+        localStorage.getItem(tagStorageKey("tagColor")) ||
         "#006b3c";
 
     // Save current editing color temporarily
@@ -2249,7 +2312,7 @@ function applyEdit(){
     data[editIndex].color =
         $("modal").dataset.editColor ||
         data[editIndex].color ||
-        localStorage.getItem("tagColor") ||
+        localStorage.getItem(tagStorageKey("tagColor")) ||
         "#006b3c";
 
     saveData();
@@ -2276,14 +2339,14 @@ document.addEventListener("keydown", function(event){
 });
 
 
-function saveDefaultCountry(){localStorage.setItem("defaultCountry",$("country").value.trim()||"USA");queueBackupAutosave();msg("Default country saved.")}
+function saveDefaultCountry(){localStorage.setItem(tagStorageKey("defaultCountry"),$("country").value.trim()||"USA");queueBackupAutosave();msg("Default country saved.")}
 function saveListTitle(){
 
     const title = $("listTitle").value.trim();
 
     if(!title) return;
 
-    localStorage.setItem("listTitle", title);
+    localStorage.setItem(tagStorageKey("listTitle"), title);
     queueBackupAutosave();
 
     msg("List title saved.");
@@ -2460,16 +2523,17 @@ async function downloadList(){
     }
 }
 function msg(t){$("status").textContent=t;setTimeout(()=>$("status").textContent="",2000)}
-const dc=localStorage.getItem("defaultCountry");
+const dc=localStorage.getItem(tagStorageKey("defaultCountry"));
 if(dc)$("country").value=dc;
 
-const savedTitle = localStorage.getItem("listTitle");
+const savedTitle = localStorage.getItem(tagStorageKey("listTitle"));
 
 if(savedTitle){
     $("listTitle").value = savedTitle;
 }
 
 loadProfile();
+applyTagsSourceUi();
 
 render();
 

@@ -54,6 +54,50 @@ export function createMessageManager(ctx) {
     return r;
   };
 
+  /*
+   * Baileys can deliver WhatsApp system events through messages.upsert too.
+   * Examples include group-setting changes, participant/admin changes,
+   * disappearing-message settings, protocol events, etc. They are not
+   * messages written/sent by a group member and must never increase the
+   * Message Manager's message count.
+   *
+   * Keep this as a negative filter rather than checking `fromMe`: the logged-in
+   * account is itself a group member, so its real messages remain countable.
+   */
+  const SYSTEM_MESSAGE_TYPES = new Set([
+    'groupSettingChange',
+    'groupParticipant',
+    'groupParticipantAdd',
+    'groupParticipantRemove',
+    'groupParticipantPromote',
+    'groupParticipantDemote',
+    'protocolMessage',
+    'senderKeyDistributionMessage',
+    'messageContextInfo',
+    'ephemeralSettingMessage',
+    'pinInChatMessage',
+    'keepInChatMessage',
+    'associatedChildMessage',
+    'statusMentionMessage',
+    'call',
+  ]);
+
+  const isMemberMessage = (msg) => {
+    const content = msg?.message;
+    if (!content || typeof content !== 'object') return false;
+
+    /*
+     * messageContextInfo can accompany a perfectly valid user message, so it
+     * is ignored rather than making the whole payload non-countable.
+     */
+    const types = Object.keys(content).filter(
+      (type) => !SYSTEM_MESSAGE_TYPES.has(type)
+    );
+
+    // If only system/control fields remain, this was not a member message.
+    return types.length > 0;
+  };
+
   const unreadSet = (jid) => {
     let set = unreadMessageIds.get(jid);
     if (!set) {
@@ -90,7 +134,7 @@ export function createMessageManager(ctx) {
     const jid = msg?.key?.remoteJid;
     const id = msg?.key?.id;
     const ts = Number(msg?.messageTimestamp || 0);
-    if (!isGroupJid(jid) || !id || !Number.isFinite(ts) || ts <= 0) return;
+    if (!isGroupJid(jid) || !id || !Number.isFinite(ts) || ts <= 0 || !isMemberMessage(msg)) return;
     let list = lastMessages.get(jid) || [];
     const key = String(id);
     list = list.filter((m) => String(m?.key?.id || '') !== key);
@@ -281,8 +325,12 @@ export function createMessageManager(ctx) {
       for (const msg of payload.messages || []) {
         const jid = msg?.key?.remoteJid;
         const id = msg?.key?.id;
+
+        // IMPORTANT: messages.upsert also carries WhatsApp system/control
+        // events. Count only actual messages authored by a group member.
+        if (!isGroupJid(jid) || !id || !isMemberMessage(msg) || !markSeen(jid, id)) continue;
+
         rememberMessage(msg);
-        if (!isGroupJid(jid) || !id || !markSeen(jid, id)) continue;
 
         const r = ensureCount(jid);
         r.total++;
