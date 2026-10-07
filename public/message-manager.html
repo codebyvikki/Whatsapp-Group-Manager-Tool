@@ -2765,6 +2765,7 @@
       download(
         `message-${readMode}-list.txt`,
         'text/plain;charset=utf-8',
+        '\uFEFF' +
         'GROUPS           ' +
         (
           readMode === 'unread'
@@ -2772,7 +2773,7 @@
             : 'TOTAL MESSAGES'
         ) +
         '\n' +
-        '\uFEFF' + listText()
+        listText()
       );
     };
 
