@@ -1,428 +1,3224 @@
 <!doctype html>
 <html lang="en">
+
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Message Manager</title>
-<style>
-:root{--bg:#f7faf8;--card:#fff;--surface:#fbfdfc;--ink:#17211b;--muted:#66736c;--brand:#128c55;--brand-dark:#0b7144;--brand-soft:#eaf8f2;--line:#dfe7e2;--danger:#b42318;--danger-soft:#fff7f7;--radius:14px;--shadow:0 5px 18px rgba(20,40,30,.06)}
-*{box-sizing:border-box}
-html,body{max-width:100%;overflow-x:hidden}
-body{margin:0;background:radial-gradient(circle at top right,rgba(18,140,85,.07),transparent 30%),var(--bg);color:var(--ink);font:15px/1.55 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",sans-serif;padding:22px 18px 40px}
-button,input,textarea{font:inherit}
-button{cursor:pointer}
-button:disabled{opacity:.55;cursor:not-allowed}
-:focus-visible{outline:3px solid rgba(18,140,85,.25);outline-offset:2px}
-main{width:min(900px,100%);margin:0 auto;display:grid;gap:18px}
-.app-header{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:4px 2px 10px}
-.brand{display:flex;align-items:center;gap:13px}
-.brand-icon{width:50px;height:50px;flex:0 0 50px;display:grid;place-items:center;border-radius:14px;color:#fff;font-size:22px;font-weight:950;background:linear-gradient(145deg,#12b973,#087744);box-shadow:0 10px 24px rgba(13,165,101,.20)}
-.brand-text h1{margin:0;font-size:1.35rem;letter-spacing:-.02em}
-.brand-text p{margin:2px 0 0;color:var(--muted);font-size:.85rem}
-.account-bar{display:flex;align-items:center;justify-content:flex-end;gap:16px;flex-wrap:wrap}
-.header-btn{min-height:42px;padding:9px 16px;font-size:.86rem;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;border-radius:10px;border:1px solid var(--brand);background:transparent;color:var(--brand);font-weight:700}
-.header-btn:hover{background:var(--brand);color:#fff}
-.status{display:inline-flex;align-items:center;gap:7px;color:var(--muted);font-size:.78rem;font-weight:700;white-space:nowrap}
-.status-dot{width:9px;height:9px;border-radius:50%;background:var(--muted)}
-.status.live{color:var(--brand)}
-.status.live .status-dot{background:var(--brand);animation:pulse 1.8s ease-out infinite}
-.status.disconnected{color:var(--danger)}
-.status.disconnected .status-dot{background:var(--danger);animation:pulse-red 1.8s ease-out infinite}
-@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(18,140,85,.45)}100%{box-shadow:0 0 0 7px rgba(18,140,85,0)}}
-@keyframes pulse-red{0%{box-shadow:0 0 0 0 rgba(180,35,24,.38)}100%{box-shadow:0 0 0 7px rgba(180,35,24,0)}}
-section{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:22px;display:grid;gap:16px;box-shadow:var(--shadow)}
-.section-header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
-.section-title{margin:0;font-size:1.05rem;font-weight:700}
-.section-description{margin:3px 0 0;color:var(--muted);font-size:.86rem}
-.tabs,.mode-tabs{display:flex;align-items:center;gap:5px;padding:4px;background:var(--surface);border:1px solid var(--line);border-radius:11px;width:fit-content;max-width:100%}
-.tabs button,.mode-tabs button{min-height:36px;padding:7px 13px;border-radius:8px;background:transparent;color:var(--muted);border:0;box-shadow:none;font-size:.82rem;font-weight:700}
-.tabs button.on,.mode-tabs button.on{background:var(--brand);color:#fff;box-shadow:0 3px 8px rgba(18,140,85,.18)}
-.tabs button:not(.on):hover,.mode-tabs button:not(.on):hover{background:transparent;color:var(--ink)}
-.tabs button.on:hover,.mode-tabs button.on:hover{background:var(--brand);color:#fff}
-.read-status{display:inline-flex;align-items:center;min-height:24px;padding:3px 9px;border-radius:999px;font-size:.75rem;font-weight:800}
-.read-status.seen{background:var(--brand-soft);color:var(--brand-dark)}
-.read-status.unread{background:#fff4f2;color:var(--danger)}
-.panel{display:grid;gap:14px}
-.message-box{border:1px dashed #b9d8c9;border-radius:12px;background:var(--surface);padding:16px;display:grid;gap:9px}
-.message-box label,label{color:var(--muted);font-size:.83rem;font-weight:700}
-.message-box textarea{width:100%;min-height:150px;resize:vertical;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--ink);padding:12px 13px;outline:none}
-.message-box textarea:focus,input:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(18,140,85,.10)}
-.counter{display:flex;justify-content:space-between;color:var(--muted);font-size:.76rem}
-.counter strong{color:var(--brand)}
-.two-column{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-label{display:grid;gap:7px}
-input[type=text],input[type=number]{width:100%;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);padding:11px 13px;outline:none}
-.actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-button{min-height:42px;border:1px solid transparent;border-radius:10px;padding:10px 15px;background:var(--brand);color:#fff;font-weight:700;transition:.15s}
-button:hover:not(:disabled){background:var(--brand-dark);box-shadow:0 5px 14px rgba(18,140,85,.18)}
-button.ghost{background:transparent;color:var(--ink);border-color:var(--line);box-shadow:none}
-.small{min-height:34px;padding:7px 10px;font-size:.78rem;border-radius:8px}
-.grow{flex:1}
-.search-wrap{position:relative}
-.search-wrap input{padding-left:38px}
-.search-icon{position:absolute;left:13px;top:50%;transform:translateY(-50%);color:var(--muted);pointer-events:none}
-.list{max-height:320px;overflow:auto;border:1px solid var(--line);border-radius:11px;background:var(--surface)}
-.item{display:flex;align-items:center;gap:11px;padding:11px 13px;border-bottom:1px solid var(--line);cursor:pointer}
-.item:last-child{border-bottom:0}
-.item:hover{background:#fff}
-.item input{width:17px;height:17px;accent-color:var(--brand)}
-.item .n{flex:1;word-break:break-word;font-weight:500}
-.item .s{color:var(--muted);font-size:.76rem;padding:3px 7px;border-radius:6px;background:#fff;border:1px solid var(--line)}
-.summary{color:var(--muted);font-size:.78rem}
-.list-card{border:1px solid var(--line);border-radius:11px;padding:14px;display:grid;gap:10px;background:var(--surface)}
-.list-card .top{display:flex;justify-content:space-between;gap:10px;align-items:center}
-.list-count{color:var(--muted);font-size:.75rem}
-.error{color:var(--danger);font-size:.82rem;white-space:pre-line}
-.job{display:none;padding:14px;border:1px solid var(--line);border-radius:11px;background:var(--surface);gap:10px}
-.job.show{display:grid}
-.job-top{display:flex;justify-content:space-between}
-.job-stats{display:flex;gap:14px;flex-wrap:wrap;color:var(--muted);font-size:.78rem}
-.job-stats b{color:var(--ink)}
-.progress-track{height:8px;border-radius:99px;background:#e7eee9;overflow:hidden}
-.progress-bar{height:100%;width:0;background:var(--brand);border-radius:99px;transition:width .25s}
-.result-list{max-height:210px;overflow:auto;display:grid;gap:5px}
-.result-row{display:flex;gap:8px;padding:7px 8px;border-radius:8px;background:#fff;border:1px solid var(--line);font-size:.76rem}
-.result-row .name{flex:1;word-break:break-word}
-.ok{color:var(--brand);font-weight:800}
-.bad{color:var(--danger);font-weight:800}
-.read-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.read-toolbar .search-wrap{flex:1;min-width:220px}
-.table-wrap{border:1px solid var(--line);border-radius:11px;overflow:auto;background:var(--surface)}
-table{width:100%;border-collapse:collapse;min-width:520px}
-th,td{padding:11px 13px;border-bottom:1px solid var(--line);text-align:left}
-th{font-size:.75rem;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);background:#fff}
-td{font-size:.84rem}
-td:last-child,th:last-child{text-align:right}
-tr:last-child td{border-bottom:0}
-.metric{font-weight:800;color:var(--brand-dark)}
-.empty{padding:28px;text-align:center;color:var(--muted);font-size:.84rem}
-.read-summary{display:flex;gap:14px;flex-wrap:wrap;color:var(--muted);font-size:.78rem}
-.read-summary b{color:var(--ink)}
-.footer{width:min(900px,100%);margin:4px auto 0;text-align:center;color:var(--muted);font-size:.72rem;letter-spacing:.02em;opacity:.75}
-.modal-backdrop{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;padding:18px;background:rgba(15,25,20,.42);backdrop-filter:blur(3px)}
-.modal-card{width:min(460px,100%);padding:20px;border:1px solid var(--line);border-radius:16px;background:var(--card);box-shadow:0 22px 70px rgba(0,0,0,.18);display:grid;gap:12px}
-.modal-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
-.modal-head h3{margin:0;font-size:1.05rem}
-.modal-head p{margin:4px 0 0;color:var(--muted);font-size:.78rem;line-height:1.45}
-.icon-btn{width:34px;height:34px;flex:0 0 34px;border:1px solid var(--line);border-radius:9px;background:var(--surface);color:var(--ink);font-size:20px;line-height:1}
-.modal-label{font-size:.8rem;font-weight:800}
-.modal-input{width:100%;min-height:44px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--ink);font-size:1rem}
-.modal-input:focus{outline:3px solid rgba(18,140,85,.16);border-color:var(--brand)}
-.modal-check{display:flex;align-items:center;gap:9px;margin-top:12px;font-size:.92rem;font-weight:700;cursor:pointer}
-.modal-check input{width:17px;height:17px;accent-color:var(--brand);cursor:pointer}
-.modal-hint{padding:9px 11px;border-radius:9px;background:var(--brand-soft);color:var(--brand-dark);font-size:.77rem;font-weight:700}
-.modal-error{min-height:18px;color:var(--danger);font-size:.78rem}
-.modal-actions{display:flex;justify-content:flex-end;gap:8px}
-[hidden]{display:none!important}
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Message Manager</title>
 
-/* Live Stats-style read table typography */
-#readBody td:first-child{
-  font-size:15px;
-  line-height:1.45;
-  font-weight:700;
-  word-break:break-word;
-  overflow-wrap:anywhere;
-}
-#readBody .metric{
-  font-size:1.3rem;
-  line-height:1.1;
-  font-weight:800;
-  font-variant-numeric:tabular-nums;
-  white-space:nowrap;
-  color:var(--brand-dark);
-}
-#readBody tr{height:auto}
-
-/* Mobile layout */
-@media(max-width:640px){
-  body{padding:15px 12px 35px}
-  section{padding:16px}
-  .app-header{align-items:flex-start}
-  .brand-text h1{font-size:1.15rem}
-  .two-column{grid-template-columns:1fr}
-  .tabs,.mode-tabs{width:100%}
-  .tabs button,.mode-tabs button{flex:1;padding-left:7px;padding-right:7px}
-  .header-btn{min-height:40px}
-  .actions button{flex:1}
-  .read-toolbar .search-wrap{min-width:100%}
-
-  /* Keep the complete read/check table visible on mobile. */
-  table{
-    min-width:0!important;
-    width:100%!important;
-    table-layout:fixed;
-  }
-  .table-wrap{
-    width:100%;
-    max-width:100%;
-    overflow-x:hidden;
-  }
-  th,td{padding:10px 9px}
-  th:first-child,td:first-child{width:72%}
-  th:last-child,td:last-child{width:28%;white-space:nowrap}
-  td:first-child{
-    word-break:break-word;
-    overflow-wrap:anywhere;
-  }
-  #readBody td:first-child{
-    font-size:15px;
-    font-weight:700;
-  }
-  #readBody .metric{
-    font-size:1.3rem;
-    font-weight:800;
-  }
-
-  .read-toolbar{width:100%}
-  .read-toolbar .actions{width:100%}
-  .read-toolbar .actions button{flex:1 1 0;min-width:0}
-
-  /* Keep every read-list action visible instead of squeezing/cropping it. */
-  #readPanel>.actions{
-    width:100%;
-    display:grid;
-    grid-template-columns:repeat(2,minmax(0,1fr));
-    gap:8px;
-  }
-  #readPanel>.actions button{
-    width:100%;
-    min-width:0;
-    flex:initial;
-    white-space:normal;
-  }
-
-  .modal-card{
-    width:100%;
-    max-height:calc(100vh - 30px);
-    overflow:auto;
-  }
-}
-
-@media(max-width:380px){
-  #readBody td:first-child{font-size:15px}
-  #readBody .metric{font-size:1.3rem}
-}
-</style>
-</head>
-<body>
-<main>
-<header class="app-header">
-  <div class="brand"><div class="brand-icon">MM</div><div class="brand-text"><h1>Message Manager</h1><p>Send, read and monitor group messages in real time</p></div></div>
-  <div class="account-bar"><a class="header-btn" href="/dashboard.html">Dashboard</a><div class="status disconnected" id="waStatus"><span class="status-dot"></span><span id="waText">Disconnected</span></div></div>
-</header>
-
-<section>
-  <div class="section-header"><div><h2 class="section-title">Message Manager</h2><p class="section-description">Send messages to groups or monitor unread and total message activity.</p></div></div>
-  <div class="tabs" id="mainTabs">
-    <button class="on" data-tab="send">Send Message</button>
-    <button data-tab="read">Read / Check Message</button>
-  </div>
-
-  <div id="sendPanel" class="panel">
-    <div class="message-box">
-      <label for="message">Message</label>
-      <textarea id="message" maxlength="4096" placeholder="Type the message you want to send to the selected groups..."></textarea>
-      <div class="counter"><span>Maximum 4,096 characters</span><strong id="counter">0 / 4096</strong></div>
-    </div>
-
-    <div class="mode-tabs" id="sendModes">
-      <button class="on" data-mode="range">Range Mode</button>
-      <button data-mode="select">Select Mode</button>
-      <button data-mode="lists">List Mode</button>
-    </div>
-
-    <div id="send-range" class="panel">
-      <label>Group Name Prefix<input id="prefix" type="text" placeholder="Enter group name prefix"></label>
-      <div class="two-column"><label>Start Number<input id="from" type="number" placeholder="From"></label><label>End Number<input id="to" type="number" placeholder="To"></label></div>
-      <div class="summary" id="rangeSummary">Enter a prefix and range to select groups.</div>
-    </div>
-
-    <div id="send-select" class="panel" hidden>
-      <div class="search-wrap"><span class="search-icon">⌕</span><input id="q" type="text" placeholder="Search groups..."></div>
-      <div class="actions"><button class="ghost small" id="selAll">Select Visible</button><button class="ghost small" id="selInvert">Invert Visible</button><button class="ghost small" id="selNone">Clear Selection</button><span class="summary grow" id="count">0 selected</span><button class="ghost small" id="reloadGroups">Refresh</button><button class="ghost small" id="saveSendList">Save as List</button></div>
-      <div class="summary" id="summary">Showing 0 of 0 groups</div><div class="list" id="groupList"></div>
-    </div>
-
-    <div id="send-lists" class="panel" hidden>
-      <div class="summary">Use a saved list. Saved lists are shared with the other group tools.</div>
-      <div id="listsBox"></div>
-    </div>
-
-    <div class="actions"><button id="sendBtn" class="grow">Send Message</button></div>
-    <div class="error" id="sendError"></div>
-
-    <div class="job" id="job">
-      <div class="job-top"><strong id="jobState">Queued</strong><span class="summary" id="jobCurrent"></span></div>
-      <div class="job-stats"><span>Processed: <b id="jobDone">0/0</b></span><span>Sent: <b id="jobSuccess">0</b></span><span>Failed: <b id="jobFailed">0</b></span></div>
-      <div class="progress-track"><div class="progress-bar" id="jobBar"></div></div>
-      <div class="result-list" id="jobResults"></div>
-      <div class="actions"><button class="ghost small" id="cancelJob" hidden>Cancel Sending</button></div>
-    </div>
-  </div>
-
-  <div id="readPanel" class="panel" hidden>
-    <div class="tabs" id="readTabs">
-      <button class="on" data-read="unread">Unread Messages</button>
-      <button data-read="total">Total Messages</button>
-    </div>
-    <div class="read-toolbar">
-      <div class="search-wrap"><span class="search-icon">⌕</span><input id="readSearch" type="text" placeholder="Search groups..."></div>
-      <button class="ghost small" id="refreshRead">Refresh</button>
-    </div>
-    <div class="read-summary"><span>Groups: <b id="readGroups">0</b></span><span>Messages: <b id="readMessages">0</b></span><span>Last sync: <b id="lastSync">Waiting…</b></span></div>
-    <div class="table-wrap"><table><thead><tr><th>Group</th><th id="metricHead">Unread Messages</th></tr></thead><tbody id="readBody"></tbody></table></div>
-    <div class="actions">
-      <button class="ghost small" id="copyList">Copy List</button>
-      <button class="ghost small" id="txtList">List TXT</button>
-      <button class="ghost small" id="csvList">List CSV</button>
-      <button class="ghost small" id="messageTagsList" title="Create a separate Tags List from groups that have reached a message requirement">Tags List</button>
-    </div>
-    <div class="summary">Live sync is active. The table updates automatically when WhatsApp delivers message or chat-state events.</div>
-  </div>
-
-  <div class="modal-backdrop" id="messageTagsModal" hidden>
-    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="messageTagsTitle">
-      <div class="modal-head">
-        <div><h3 id="messageTagsTitle">Create Message Tags List</h3><p>Only groups that have reached the required number of messages will be included.</p></div>
-        <button class="icon-btn" id="closeMessageTags" type="button" aria-label="Close">×</button>
-      </div>
-      <label class="modal-label" for="messageRequirement">Minimum messages required</label>
-      <input id="messageRequirement" class="modal-input" type="number" min="1" step="1" inputmode="numeric" placeholder="e.g. 5">
-      <label class="modal-check" for="messageTagsWithMessages">
-        <input id="messageTagsWithMessages" type="checkbox">
-        <span>Do you want tags with messages?</span>
-      </label>
-      <div class="modal-hint" id="messageTagsModeHint">By default, tags will be created empty. Turn this on to include the message count in each tag.</div>
-      <div class="modal-error" id="messageTagsError"></div>
-      <div class="modal-actions">
-        <button class="ghost small" id="cancelMessageTags" type="button">Cancel</button>
-        <button class="small" id="createMessageTags" type="button">Create Tags List</button>
-      </div>
-    </div>
-  </div>
-</section>
-</main>
-<footer class="footer">Developed by <b>Vikki Prime</b></footer>
-
-<script>
-const $=id=>document.getElementById(id);
-const wait=ms=>new Promise(r=>setTimeout(r,ms));
-const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const api=async(url,body,options={})=>{const method=String(options.method||(body!==undefined?'POST':'GET')).toUpperCase();const o={credentials:'same-origin',...options,method};if(body!==undefined&&method!=='GET'&&method!=='HEAD'){o.headers={'Content-Type':'application/json',...(options.headers||{})};o.body=JSON.stringify(body)}let last;for(let i=0;i<3;i++){try{const r=await fetch(url,o);const j=await r.json().catch(()=>({}));if(!r.ok)throw Object.assign(new Error(j.error||'Request failed'),{status:r.status});return j}catch(e){last=e;if(e?.status&&![502,503,504].includes(e.status))throw e;if(i<2)await wait(450*(i+1))}}throw last||new Error('Network request failed')};
-
-let groups=[],lists=[],selected=new Set(),sendMode='range',selectedListIds=null,readMode='unread',rows=[],jobId=null,stream=null;
-
-function updateWa(state){$('waStatus').className='status '+(state==='connected'?'live':'disconnected');$('waText').textContent=state==='connected'?'Connected':'Disconnected'}
-async function gate(){try{const me=await api('/api/me');if(!me.loggedIn){location.replace('/dashboard.html');return false}const s=await api('/api/status');updateWa(s.state==='connected'?'connected':'disconnected');return s.state==='connected'}catch{location.replace('/dashboard.html');return false}}
-
-function setMainTab(tab){$('mainTabs').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.tab===tab));$('sendPanel').hidden=tab!=='send';$('readPanel').hidden=tab!=='read';if(tab==='read')refreshRead()}
-$('mainTabs').onclick=e=>{if(e.target.dataset.tab)setMainTab(e.target.dataset.tab)}
-$('message').oninput=()=>{$('counter').textContent=`${$('message').value.length} / 4096`}
-
-function setSendMode(m){sendMode=m;$('sendModes').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.mode===m));['range','select','lists'].forEach(x=>$('send-'+x).hidden=x!==m);selectedListIds=null;if(m==='select')loadGroups();if(m==='lists')loadLists();if(m==='range')updateRange()}
-$('sendModes').onclick=e=>{if(e.target.dataset.mode)setSendMode(e.target.dataset.mode)}
-
-async function loadGroups(refresh=false){try{const j=await api('/api/groups'+(refresh?'?refresh=1':''));groups=j.groups||[];[...selected].forEach(id=>{if(!groups.some(g=>g.id===id))selected.delete(id)});renderPicker();updateRange()}catch(e){$('sendError').textContent=e.message}}
-function visible(){const q=$('q').value.trim().toLowerCase();return groups.filter(g=>!q||g.name.toLowerCase().includes(q))}
-function renderPicker(){const v=visible();$('groupList').innerHTML=v.length?v.map(g=>`<label class="item"><input type="checkbox" data-id="${esc(g.id)}" ${selected.has(g.id)?'checked':''}><span class="n">${esc(g.name)}</span><span class="s">${g.size}</span></label>`).join(''):'<div class="item summary">No groups found.</div>';$('count').textContent=`${selected.size} selected`;$('summary').textContent=`Showing ${v.length} of ${groups.length} groups`}
-$('groupList').onchange=e=>{if(e.target.type!=='checkbox')return;e.target.checked?selected.add(e.target.dataset.id):selected.delete(e.target.dataset.id);$('count').textContent=`${selected.size} selected`};
-$('q').oninput=renderPicker;$('selAll').onclick=()=>{visible().forEach(g=>selected.add(g.id));renderPicker()};$('selInvert').onclick=()=>{visible().forEach(g=>selected.has(g.id)?selected.delete(g.id):selected.add(g.id));renderPicker()};$('selNone').onclick=()=>{selected.clear();renderPicker()};$('reloadGroups').onclick=()=>loadGroups(true);
-
-function rangeIds(){const from=Number($('from').value),to=Number($('to').value),prefix=$('prefix').value.trim();if(!prefix||!Number.isInteger(from)||!Number.isInteger(to)||from>to)return[];return groups.filter(g=>g.name.startsWith(prefix)&&(()=>{const m=g.name.match(/(\d+)\s*$/);return m&&Number(m[1])>=from&&Number(m[1])<=to})()).map(g=>g.id)}
-function updateRange(){const ids=rangeIds();$('rangeSummary').textContent=ids.length?`${ids.length} groups match this range.`:'Enter a prefix and range to select matching groups.'}
-$('prefix').oninput=updateRange;$('from').oninput=updateRange;$('to').oninput=updateRange;
-
-async function loadLists(){try{if(!groups.length)await loadGroups();lists=(await api('/api/lists')).lists||[];renderLists()}catch(e){$('sendError').textContent=e.message}}
-function renderLists(){if(!lists.length){$('listsBox').innerHTML='<div class="summary">No saved lists yet.</div>';return}const names=new Map(groups.map(g=>[g.id,g.name]));$('listsBox').innerHTML=lists.map((l,i)=>`<div class="list-card"><div class="top"><b>${esc(l.name)}</b><span class="list-count">${l.ids.length} groups</span></div><div class="summary">${esc(l.ids.map(id=>names.get(id)).filter(Boolean).slice(0,3).join(', ')||'Saved group selection')}${l.ids.length>3?' + more':''}</div><button class="small" data-use="${i}">Use this list</button></div>`).join('')}
-$('listsBox').onclick=e=>{const b=e.target.closest('[data-use]');if(!b)return;const l=lists[Number(b.dataset.use)];selectedListIds=[...new Set(l.ids)];$('sendError').textContent=`"${l.name}" selected · ${selectedListIds.length} groups ready.`}
-$('saveSendList').onclick=async()=>{if(!selected.size){$('sendError').textContent='Please select at least one group.';return}const name=prompt('Enter a list name:');if(!name)return;try{lists=(await api('/api/lists',{name,ids:[...selected]})).lists||[];$('sendError').textContent=`"${name}" has been saved successfully.`}catch(e){$('sendError').textContent=e.message}}
-
-function targetIds(){if(sendMode==='range'){const ids=rangeIds();if(!ids.length)throw new Error('No groups match the selected range.');return ids}if(sendMode==='select'){if(!selected.size)throw new Error('Please select at least one group.');return [...selected]}if(!selectedListIds?.length)throw new Error('Choose a saved list first.');return [...selectedListIds]}
-
-function renderJob(job){$('job').classList.add('show');$('cancelJob').disabled=false;$('jobState').textContent=job.state==='finished'?'Completed':job.state==='cancelled'?'Cancelled':job.state==='cancelling'?'Cancelling…':job.state==='error'?'Stopped':job.state==='running'?'Sending…':'Queued';$('jobDone').textContent=`${job.done}/${job.total}`;$('jobSuccess').textContent=job.success;$('jobFailed').textContent=job.failed;$('jobBar').style.width=(job.total?Math.round(job.done/job.total*100):0)+'%';$('jobCurrent').textContent=job.current?`Processing ${job.current.index}/${job.current.total}: ${job.current.name}`:(job.error||'');$('jobResults').innerHTML=(job.results||[]).map(x=>`<div class="result-row"><span class="${x.status==='success'?'ok':'bad'}">${x.status==='success'?'✓':'✕'}</span><span class="name">${esc(x.name)}</span>${x.error?`<span class="bad">${esc(x.error)}</span>`:''}</div>`).join('');$('cancelJob').hidden=!['queued','running'].includes(job.state)}
-$('cancelJob').onclick=async()=>{if(!jobId)return;const id=jobId;$('cancelJob').disabled=true;try{const j=await api('/api/messages/jobs/'+encodeURIComponent(id)+'/cancel',{});if(j.job)renderJob(j.job)}catch(e){$('sendError').textContent=e.message;$('cancelJob').disabled=false}};
-
-async function sendMessage(){try{$('sendError').textContent='';const message=$('message').value.trim();const ids=targetIds();if(!message)throw new Error('Enter a message first.');$('sendBtn').disabled=true;const j=await api('/api/messages/send',{message,groupIds:ids});jobId=j.job.id;renderJob(j.job);$('sendBtn').disabled=false}catch(e){$('sendError').textContent=e.message;$('sendBtn').disabled=false}}
-$('sendBtn').onclick=sendMessage;
-
-function applySnapshot(data){rows=data.rows||[];if(data.lastSync)$('lastSync').textContent=new Date(data.lastSync).toLocaleTimeString();renderRead()}
-function filteredRead(){const q=$('readSearch').value.trim().toLowerCase();return rows.filter(r=>!q||r.name.toLowerCase().includes(q)).filter(r=>readMode==='unread'?r.unread>0:true)}
-function renderRead(){const list=filteredRead();$('metricHead').textContent=readMode==='unread'?'Unread Messages':'Total Messages';$('readBody').innerHTML=list.length?list.map(r=>{const unread=Math.max(0,Number(r.unread)||0),total=Math.max(0,Number(r.total)||0);return `<tr><td>${esc(r.name)}</td><td class="metric">${readMode==='unread'?unread:total}</td></tr>`}).join(''):'<tr><td colspan="2" class="empty">No matching groups.</td></tr>';$('readGroups').textContent=list.length;$('readMessages').textContent=list.reduce((n,r)=>n+(readMode==='unread'?Math.max(0,Number(r.unread)||0):Math.max(0,Number(r.total)||0)),0)}
-$('readSearch').oninput=renderRead;
-$('readTabs').onclick=e=>{if(!e.target.dataset.read)return;readMode=e.target.dataset.read;$('readTabs').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.read===readMode));renderRead()}
-
-async function refreshRead(){try{const j=await api('/api/messages/overview',undefined,{method:'GET'});applySnapshot(j)}catch(e){$('sendError').textContent=e.message}}
-$('refreshRead').onclick=async()=>{try{const j=await api('/api/messages/refresh',{});applySnapshot(j)}catch(e){$('sendError').textContent=e.message}}
-
-function exportLines(){return filteredRead().map(r=>[r.name,readMode==='unread'?r.unread:r.total])}
-function listText(){return exportLines().map(([n,c])=>`${n}= ${c}`).join('\n')}
-$('copyList').onclick=async()=>{try{await navigator.clipboard.writeText(listText());$('copyList').textContent='Copied ✓';setTimeout(()=>$('copyList').textContent='Copy List',1200)}catch{$('sendError').textContent='Could not copy the list.'}}
-function download(name,type,body){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([body],{type}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
-$('txtList').onclick=()=>download(`message-${readMode}-list.txt`,'text/plain;charset=utf-8','GROUPS           '+(readMode==='unread'?'UNREAD MESSAGES':'TOTAL MESSAGES')+'\n'+listText());
-$('csvList').onclick=()=>{const escCsv=v=>{v=String(v??'');return /[",\n]/.test(v)?`"${v.replace(/"/g,'""')}"`:v};const body=[['GROUPS',readMode==='unread'?'UNREAD MESSAGES':'TOTAL MESSAGES'],...exportLines()].map(r=>r.map(escCsv).join(',')).join('\r\n');download(`message-${readMode}-list.csv`,'text/csv;charset=utf-8','\uFEFF'+body)}
-
-function openMessageTagsModal(){
-  $('messageTagsError').textContent='';
-  $('messageRequirement').value='';
-  $('messageTagsWithMessages').checked=false;
-  $('messageTagsModeHint').textContent='By default, tags will be created empty. Turn this on to include the message count in each tag.';
-  $('messageTagsModal').hidden=false;
-  setTimeout(()=>$('messageRequirement').focus(),30);
-}
-function updateMessageTagsModeHint(){
-  $('messageTagsModeHint').textContent = $('messageTagsWithMessages').checked
-    ? 'Tags will include the group message count.'
-    : 'Tags will be created empty; the message count will not be added to the tags.';
-}
-$('messageTagsWithMessages').onchange=updateMessageTagsModeHint;
-function closeMessageTagsModal(){ $('messageTagsModal').hidden=true; }
-$('messageTagsList').onclick=openMessageTagsModal;
-$('closeMessageTags').onclick=closeMessageTagsModal;
-$('cancelMessageTags').onclick=closeMessageTagsModal;
-$('messageTagsModal').addEventListener('click',e=>{if(e.target===$('messageTagsModal'))closeMessageTagsModal()});
-$('messageRequirement').addEventListener('keydown',e=>{if(e.key==='Enter')$('createMessageTags').click();if(e.key==='Escape')closeMessageTagsModal()});
-
-async function createMessageTags(){
-  const requirement=Number($('messageRequirement').value);
-  if(!Number.isInteger(requirement)||requirement<1){
-    $('messageTagsError').textContent='Enter a valid minimum message count (1 or more).';
-    $('messageRequirement').focus();
-    return;
-  }
-  const btn=$('createMessageTags');
-  const includeMessages=$('messageTagsWithMessages').checked;
-  btn.disabled=true;
-  $('messageTagsError').textContent='';
-  try{
-    const fresh=await api('/api/messages/refresh',{});
-    applySnapshot(fresh);
-    const metric='total';
-    const eligible=(fresh.rows||[])
-      .filter(r=>Math.max(0,Number(r?.[metric])||0)>=requirement)
-      .map(r=>({
-        name:String(r.name||''),
-        members:includeMessages ? Math.max(0,Number(r?.[metric])||0) : 0,
-        country:''
-      }));
-    if(!eligible.length){
-      throw new Error(`No groups have reached ${requirement} total messages yet.`);
+  <style>
+    :root {
+      --bg: #f7faf8;
+      --card: #fff;
+      --surface: #fbfdfc;
+      --ink: #17211b;
+      --muted: #66736c;
+      --brand: #128c55;
+      --brand-dark: #0b7144;
+      --brand-soft: #eaf8f2;
+      --line: #dfe7e2;
+      --danger: #b42318;
+      --danger-soft: #fff7f7;
+      --radius: 14px;
+      --shadow: 0 5px 18px rgba(20, 40, 30, .06);
     }
-    sessionStorage.setItem('waMessageTagsImport',JSON.stringify({
-      version:2, source:'message-manager', metric, requirement, includeMessages, createdAt:Date.now(), groups:eligible
-    }));
-    sessionStorage.setItem('waMessageTagsOpened','1');
-    window.location.href='/tags-list.html';
-  }catch(e){
-    $('messageTagsError').textContent=e.message||'Could not create Message Tags List.';
-  }finally{
-    btn.disabled=false;
-  }
-}
-$('createMessageTags').onclick=createMessageTags;
 
-function connectStream(){if(stream)stream.close();stream=new EventSource('/api/messages/stream');stream.addEventListener('snapshot',e=>{try{applySnapshot(JSON.parse(e.data))}catch{}});stream.addEventListener('rows',e=>{try{const d=JSON.parse(e.data);const changed=new Map((d.rows||[]).map(r=>[r.id,r]));rows=rows.map(r=>changed.get(r.id)||r);for(const r of d.rows||[])if(!rows.some(x=>x.id===r.id))rows.push(r);rows.sort((a,b)=>(a.num-b.num)||a.name.localeCompare(b.name));if(d.lastSync)$('lastSync').textContent=new Date(d.lastSync).toLocaleTimeString();renderRead()}catch{}});stream.addEventListener('send-progress',e=>{try{const j=JSON.parse(e.data).job;if(!jobId||j.id===jobId)renderJob(j)}catch{}});stream.onerror=()=>updateWa('disconnected')}
+    * {
+      box-sizing: border-box;
+    }
 
-(async()=>{if(await gate()){await loadGroups();await refreshRead();connectStream()}})();
-</script>
+    html,
+    body {
+      max-width: 100%;
+      overflow-x: hidden;
+    }
+
+    body {
+      margin: 0;
+      background:
+        radial-gradient(
+          circle at top right,
+          rgba(18, 140, 85, .07),
+          transparent 30%
+        ),
+        var(--bg);
+      color: var(--ink);
+      font: 15px/1.55 system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", "Noto Sans", sans-serif;
+      padding: 22px 18px 40px;
+    }
+
+    button,
+    input,
+    textarea {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    button:disabled {
+      opacity: .55;
+      cursor: not-allowed;
+    }
+
+    :focus-visible {
+      outline: 3px solid rgba(18, 140, 85, .25);
+      outline-offset: 2px;
+    }
+
+    main {
+      width: min(900px, 100%);
+      margin: 0 auto;
+      display: grid;
+      gap: 18px;
+    }
+
+    /* =========================================================
+       APP HEADER
+       ========================================================= */
+
+    .app-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 4px 2px 10px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 13px;
+    }
+
+    .brand-icon {
+      width: 50px;
+      height: 50px;
+      flex: 0 0 50px;
+      display: grid;
+      place-items: center;
+      border-radius: 14px;
+      color: #fff;
+      font-size: 22px;
+      font-weight: 950;
+      background: linear-gradient(145deg, #12b973, #087744);
+      box-shadow: 0 10px 24px rgba(13, 165, 101, .20);
+    }
+
+    .brand-text h1 {
+      margin: 0;
+      font-size: 1.35rem;
+      letter-spacing: -.02em;
+    }
+
+    .brand-text p {
+      margin: 2px 0 0;
+      color: var(--muted);
+      font-size: .85rem;
+    }
+
+    .account-bar {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .header-btn {
+      min-height: 42px;
+      padding: 9px 16px;
+      font-size: .86rem;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 10px;
+      border: 1px solid var(--brand);
+      background: transparent;
+      color: var(--brand);
+      font-weight: 700;
+    }
+
+    .header-btn:hover {
+      background: var(--brand);
+      color: #fff;
+    }
+
+    /* =========================================================
+       CONNECTION STATUS
+       ========================================================= */
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--muted);
+      font-size: .78rem;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .status-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--muted);
+    }
+
+    .status.live {
+      color: var(--brand);
+    }
+
+    .status.live .status-dot {
+      background: var(--brand);
+      animation: pulse 1.8s ease-out infinite;
+    }
+
+    .status.disconnected {
+      color: var(--danger);
+    }
+
+    .status.disconnected .status-dot {
+      background: var(--danger);
+      animation: pulse-red 1.8s ease-out infinite;
+    }
+
+    @keyframes pulse {
+      0% {
+        box-shadow: 0 0 0 0 rgba(18, 140, 85, .45);
+      }
+
+      100% {
+        box-shadow: 0 0 0 7px rgba(18, 140, 85, 0);
+      }
+    }
+
+    @keyframes pulse-red {
+      0% {
+        box-shadow: 0 0 0 0 rgba(180, 35, 24, .38);
+      }
+
+      100% {
+        box-shadow: 0 0 0 7px rgba(180, 35, 24, 0);
+      }
+    }
+
+    /* =========================================================
+       SECTIONS
+       ========================================================= */
+
+    section {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 22px;
+      display: grid;
+      gap: 16px;
+      box-shadow: var(--shadow);
+    }
+
+    .section-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .section-title {
+      margin: 0;
+      font-size: 1.05rem;
+      font-weight: 700;
+    }
+
+    .section-description {
+      margin: 3px 0 0;
+      color: var(--muted);
+      font-size: .86rem;
+    }
+
+    /* =========================================================
+       TABS
+       ========================================================= */
+
+    .tabs,
+    .mode-tabs {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      width: fit-content;
+      max-width: 100%;
+    }
+
+    .tabs button,
+    .mode-tabs button {
+      min-height: 36px;
+      padding: 7px 13px;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--muted);
+      border: 0;
+      box-shadow: none;
+      font-size: .82rem;
+      font-weight: 700;
+    }
+
+    .tabs button.on,
+    .mode-tabs button.on {
+      background: var(--brand);
+      color: #fff;
+      box-shadow: 0 3px 8px rgba(18, 140, 85, .18);
+    }
+
+    .tabs button:not(.on):hover,
+    .mode-tabs button:not(.on):hover {
+      background: transparent;
+      color: var(--ink);
+    }
+
+    .tabs button.on:hover,
+    .mode-tabs button.on:hover {
+      background: var(--brand);
+      color: #fff;
+    }
+
+    .read-status {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 3px 9px;
+      border-radius: 999px;
+      font-size: .75rem;
+      font-weight: 800;
+    }
+
+    .read-status.seen {
+      background: var(--brand-soft);
+      color: var(--brand-dark);
+    }
+
+    .read-status.unread {
+      background: #fff4f2;
+      color: var(--danger);
+    }
+
+    /* =========================================================
+       PANELS
+       ========================================================= */
+
+    .panel {
+      display: grid;
+      gap: 14px;
+    }
+
+    .message-box {
+      border: 1px dashed #b9d8c9;
+      border-radius: 12px;
+      background: var(--surface);
+      padding: 16px;
+      display: grid;
+      gap: 9px;
+    }
+
+    .message-box label,
+    label {
+      color: var(--muted);
+      font-size: .83rem;
+      font-weight: 700;
+    }
+
+    .message-box textarea {
+      width: 100%;
+      min-height: 150px;
+      resize: vertical;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+      color: var(--ink);
+      padding: 12px 13px;
+      outline: none;
+    }
+
+    .message-box textarea:focus,
+    input:focus {
+      border-color: var(--brand);
+      box-shadow: 0 0 0 3px rgba(18, 140, 85, .10);
+    }
+
+    .counter {
+      display: flex;
+      justify-content: space-between;
+      color: var(--muted);
+      font-size: .76rem;
+    }
+
+    .counter strong {
+      color: var(--brand);
+    }
+
+    .two-column {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+
+    label {
+      display: grid;
+      gap: 7px;
+    }
+
+    input[type="text"],
+    input[type="number"] {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface);
+      color: var(--ink);
+      padding: 11px 13px;
+      outline: none;
+    }
+
+    /* =========================================================
+       BUTTONS
+       ========================================================= */
+
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    button {
+      min-height: 42px;
+      border: 1px solid transparent;
+      border-radius: 10px;
+      padding: 10px 15px;
+      background: var(--brand);
+      color: #fff;
+      font-weight: 700;
+      transition: .15s;
+    }
+
+    button:hover:not(:disabled) {
+      background: var(--brand-dark);
+      box-shadow: 0 5px 14px rgba(18, 140, 85, .18);
+    }
+
+    button.ghost {
+      background: transparent;
+      color: var(--ink);
+      border-color: var(--line);
+      box-shadow: none;
+    }
+
+    .small {
+      min-height: 34px;
+      padding: 7px 10px;
+      font-size: .78rem;
+      border-radius: 8px;
+    }
+
+    .grow {
+      flex: 1;
+    }
+
+    /* =========================================================
+       SEARCH
+       ========================================================= */
+
+    .search-wrap {
+      position: relative;
+    }
+
+    .search-wrap input {
+      padding-left: 38px;
+    }
+
+    .search-icon {
+      position: absolute;
+      left: 13px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--muted);
+      pointer-events: none;
+    }
+
+    /* =========================================================
+       GROUP LIST
+       ========================================================= */
+
+    .list {
+      max-height: 320px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      background: var(--surface);
+    }
+
+    .item {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      padding: 11px 13px;
+      border-bottom: 1px solid var(--line);
+      cursor: pointer;
+    }
+
+    .item:last-child {
+      border-bottom: 0;
+    }
+
+    .item:hover {
+      background: #fff;
+    }
+
+    .item input {
+      width: 17px;
+      height: 17px;
+      accent-color: var(--brand);
+    }
+
+    .item .n {
+      flex: 1;
+      word-break: break-word;
+      font-weight: 500;
+    }
+
+    .item .s {
+      color: var(--muted);
+      font-size: .76rem;
+      padding: 3px 7px;
+      border-radius: 6px;
+      background: #fff;
+      border: 1px solid var(--line);
+    }
+
+    .summary {
+      color: var(--muted);
+      font-size: .78rem;
+    }
+
+    .list-card {
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      padding: 14px;
+      display: grid;
+      gap: 10px;
+      background: var(--surface);
+    }
+
+    .list-card .top {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .list-count {
+      color: var(--muted);
+      font-size: .75rem;
+    }
+
+    .error {
+      color: var(--danger);
+      font-size: .82rem;
+      white-space: pre-line;
+    }
+
+    /* =========================================================
+       SEND JOB
+       ========================================================= */
+
+    .job {
+      display: none;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      background: var(--surface);
+      gap: 10px;
+    }
+
+    .job.show {
+      display: grid;
+    }
+
+    .job-top {
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .job-stats {
+      display: flex;
+      gap: 14px;
+      flex-wrap: wrap;
+      color: var(--muted);
+      font-size: .78rem;
+    }
+
+    .job-stats b {
+      color: var(--ink);
+    }
+
+    .progress-track {
+      height: 8px;
+      border-radius: 99px;
+      background: #e7eee9;
+      overflow: hidden;
+    }
+
+    .progress-bar {
+      height: 100%;
+      width: 0;
+      background: var(--brand);
+      border-radius: 99px;
+      transition: width .25s;
+    }
+
+    .result-list {
+      max-height: 210px;
+      overflow: auto;
+      display: grid;
+      gap: 5px;
+    }
+
+    .result-row {
+      display: flex;
+      gap: 8px;
+      padding: 7px 8px;
+      border-radius: 8px;
+      background: #fff;
+      border: 1px solid var(--line);
+      font-size: .76rem;
+    }
+
+    .result-row .name {
+      flex: 1;
+      word-break: break-word;
+    }
+
+    .ok {
+      color: var(--brand);
+      font-weight: 800;
+    }
+
+    .bad {
+      color: var(--danger);
+      font-weight: 800;
+    }
+
+    /* =========================================================
+       READ / MESSAGE TABLE
+       ========================================================= */
+
+    .read-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .read-toolbar .search-wrap {
+      flex: 1;
+      min-width: 220px;
+    }
+
+    .table-wrap {
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      overflow: auto;
+      background: var(--surface);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 520px;
+    }
+
+    th,
+    td {
+      padding: 11px 13px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+    }
+
+    th {
+      font-size: .75rem;
+      text-transform: uppercase;
+      letter-spacing: .03em;
+      color: var(--muted);
+      background: #fff;
+    }
+
+    td {
+      font-size: .84rem;
+    }
+
+    td:last-child,
+    th:last-child {
+      text-align: right;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .metric {
+      font-weight: 800;
+      color: var(--brand-dark);
+    }
+
+    .empty {
+      padding: 28px;
+      text-align: center;
+      color: var(--muted);
+      font-size: .84rem;
+    }
+
+    .read-summary {
+      display: flex;
+      gap: 14px;
+      flex-wrap: wrap;
+      color: var(--muted);
+      font-size: .78rem;
+    }
+
+    .read-summary b {
+      color: var(--ink);
+    }
+
+    /* =========================================================
+       FOOTER
+       ========================================================= */
+
+    .footer {
+      width: min(900px, 100%);
+      margin: 4px auto 0;
+      text-align: center;
+      color: var(--muted);
+      font-size: .72rem;
+      letter-spacing: .02em;
+      opacity: .75;
+    }
+
+    /* =========================================================
+       MESSAGE TAGS MODAL
+       ========================================================= */
+
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      display: grid;
+      place-items: center;
+      padding: 18px;
+      background: rgba(15, 25, 20, .42);
+      backdrop-filter: blur(3px);
+    }
+
+    .modal-card {
+      width: min(460px, 100%);
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--card);
+      box-shadow: 0 22px 70px rgba(0, 0, 0, .18);
+      display: grid;
+      gap: 12px;
+    }
+
+    .modal-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .modal-head h3 {
+      margin: 0;
+      font-size: 1.05rem;
+    }
+
+    .modal-head p {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: .78rem;
+      line-height: 1.45;
+    }
+
+    .icon-btn {
+      width: 34px;
+      height: 34px;
+      flex: 0 0 34px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: var(--surface);
+      color: var(--ink);
+      font-size: 20px;
+      line-height: 1;
+    }
+
+    .modal-label {
+      font-size: .8rem;
+      font-weight: 800;
+    }
+
+    .modal-input {
+      width: 100%;
+      min-height: 44px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+      color: var(--ink);
+      font-size: 1rem;
+    }
+
+    .modal-input:focus {
+      outline: 3px solid rgba(18, 140, 85, .16);
+      border-color: var(--brand);
+    }
+
+    .modal-check {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      margin-top: 12px;
+      font-size: .92rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .modal-check input {
+      width: 17px;
+      height: 17px;
+      accent-color: var(--brand);
+      cursor: pointer;
+    }
+
+    .modal-hint {
+      padding: 9px 11px;
+      border-radius: 9px;
+      background: var(--brand-soft);
+      color: var(--brand-dark);
+      font-size: .77rem;
+      font-weight: 700;
+    }
+
+    .modal-error {
+      min-height: 18px;
+      color: var(--danger);
+      font-size: .78rem;
+    }
+
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
+    [hidden] {
+      display: none !important;
+    }
+
+    /* =========================================================
+       LIVE STATS-STYLE READ TABLE TYPOGRAPHY
+       ========================================================= */
+
+    #readBody td:first-child {
+      font-size: 15px;
+      line-height: 1.45;
+      font-weight: 700;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+    }
+
+    #readBody .metric {
+      font-size: 1.3rem;
+      line-height: 1.1;
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+      color: var(--brand-dark);
+    }
+
+    #readBody tr {
+      height: auto;
+    }
+
+    /* =========================================================
+       MOBILE LAYOUT
+       ========================================================= */
+
+    @media (max-width: 640px) {
+
+      body {
+        padding: 15px 12px 35px;
+      }
+
+      section {
+        padding: 16px;
+      }
+
+      .app-header {
+        align-items: flex-start;
+      }
+
+      .brand-text h1 {
+        font-size: 1.15rem;
+      }
+
+      .two-column {
+        grid-template-columns: 1fr;
+      }
+
+      .tabs,
+      .mode-tabs {
+        width: 100%;
+      }
+
+      .tabs button,
+      .mode-tabs button {
+        flex: 1;
+        padding-left: 7px;
+        padding-right: 7px;
+      }
+
+      .header-btn {
+        min-height: 40px;
+      }
+
+      .actions button {
+        flex: 1;
+      }
+
+      .read-toolbar .search-wrap {
+        min-width: 100%;
+      }
+
+      /* =====================================================
+         MOBILE READ TABLE
+         ===================================================== */
+
+      /*
+       * On mobile the table uses the complete available width.
+       * The old nowrap rule on the last header caused
+       * "Unread Messages" / "Total Messages" to be cropped.
+       */
+
+      table {
+        min-width: 0 !important;
+        width: 100% !important;
+        table-layout: fixed;
+      }
+
+      .table-wrap {
+        width: 100%;
+        max-width: 100%;
+        overflow-x: hidden;
+      }
+
+      th,
+      td {
+        padding: 10px 9px;
+      }
+
+      /*
+       * Give the group column slightly more space while
+       * keeping enough width for the message-count column.
+       */
+      th:first-child,
+      td:first-child {
+        width: 68%;
+      }
+
+      th:last-child,
+      td:last-child {
+        width: 32%;
+      }
+
+      /*
+       * IMPORTANT:
+       * Header text is allowed to wrap so that
+       * "Unread Messages" and "Total Messages"
+       * are always completely visible on mobile.
+       */
+      th:last-child {
+        white-space: normal;
+        overflow-wrap: break-word;
+        word-break: normal;
+        line-height: 1.25;
+      }
+
+      /*
+       * Message numbers themselves should remain on one line.
+       */
+      td:last-child {
+        white-space: nowrap;
+      }
+
+      td:first-child {
+        word-break: break-word;
+        overflow-wrap: anywhere;
+      }
+
+      #readBody td:first-child {
+        font-size: 15px;
+        font-weight: 700;
+      }
+
+      #readBody .metric {
+        font-size: 1.3rem;
+        font-weight: 800;
+      }
+
+      .read-toolbar {
+        width: 100%;
+      }
+
+      .read-toolbar .actions {
+        width: 100%;
+      }
+
+      .read-toolbar .actions button {
+        flex: 1 1 0;
+        min-width: 0;
+      }
+
+      /*
+       * Keep every read-list action visible instead of
+       * squeezing or cropping the buttons.
+       */
+      #readPanel > .actions {
+        width: 100%;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      #readPanel > .actions button {
+        width: 100%;
+        min-width: 0;
+        flex: initial;
+        white-space: normal;
+      }
+
+      .modal-card {
+        width: 100%;
+        max-height: calc(100vh - 30px);
+        overflow: auto;
+      }
+    }
+
+    /* =========================================================
+       VERY SMALL MOBILE SCREENS
+       ========================================================= */
+
+    @media (max-width: 380px) {
+
+      #readBody td:first-child {
+        font-size: 15px;
+      }
+
+      #readBody .metric {
+        font-size: 1.3rem;
+      }
+
+      /*
+       * Keep the table header readable even on very
+       * narrow 320px-class screens.
+       */
+      th:last-child {
+        font-size: .70rem;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <main>
+
+    <!-- =======================================================
+         APP HEADER
+         ======================================================= -->
+
+    <header class="app-header">
+
+      <div class="brand">
+        <div class="brand-icon">MM</div>
+
+        <div class="brand-text">
+          <h1>Message Manager</h1>
+          <p>Send, read and monitor group messages in real time</p>
+        </div>
+      </div>
+
+      <div class="account-bar">
+
+        <a class="header-btn" href="/dashboard.html">
+          Dashboard
+        </a>
+
+        <div class="status disconnected" id="waStatus">
+          <span class="status-dot"></span>
+          <span id="waText">Disconnected</span>
+        </div>
+
+      </div>
+
+    </header>
+
+
+    <!-- =======================================================
+         MESSAGE MANAGER
+         ======================================================= -->
+
+    <section>
+
+      <div class="section-header">
+        <div>
+          <h2 class="section-title">Message Manager</h2>
+
+          <p class="section-description">
+            Send messages to groups or monitor unread and total message activity.
+          </p>
+        </div>
+      </div>
+
+
+      <!-- =====================================================
+           MAIN TABS
+           ===================================================== -->
+
+      <div class="tabs" id="mainTabs">
+
+        <button class="on" data-tab="send">
+          Send Message
+        </button>
+
+        <button data-tab="read">
+          Read / Check Message
+        </button>
+
+      </div>
+
+
+      <!-- =====================================================
+           SEND MESSAGE PANEL
+           ===================================================== -->
+
+      <div id="sendPanel" class="panel">
+
+        <!-- Message input -->
+
+        <div class="message-box">
+
+          <label for="message">
+            Message
+          </label>
+
+          <textarea
+            id="message"
+            maxlength="4096"
+            placeholder="Type the message you want to send to the selected groups..."
+          ></textarea>
+
+          <div class="counter">
+            <span>Maximum 4,096 characters</span>
+            <strong id="counter">0 / 4096</strong>
+          </div>
+
+        </div>
+
+
+        <!-- Send mode tabs -->
+
+        <div class="mode-tabs" id="sendModes">
+
+          <button class="on" data-mode="range">
+            Range Mode
+          </button>
+
+          <button data-mode="select">
+            Select Mode
+          </button>
+
+          <button data-mode="lists">
+            List Mode
+          </button>
+
+        </div>
+
+
+        <!-- ===================================================
+             RANGE MODE
+             =================================================== -->
+
+        <div id="send-range" class="panel">
+
+          <label>
+            Group Name Prefix
+
+            <input
+              id="prefix"
+              type="text"
+              placeholder="Enter group name prefix"
+            >
+          </label>
+
+          <div class="two-column">
+
+            <label>
+              Start Number
+
+              <input
+                id="from"
+                type="number"
+                placeholder="From"
+              >
+            </label>
+
+            <label>
+              End Number
+
+              <input
+                id="to"
+                type="number"
+                placeholder="To"
+              >
+            </label>
+
+          </div>
+
+          <div class="summary" id="rangeSummary">
+            Enter a prefix and range to select groups.
+          </div>
+
+        </div>
+
+
+        <!-- ===================================================
+             SELECT MODE
+             =================================================== -->
+
+        <div id="send-select" class="panel" hidden>
+
+          <div class="search-wrap">
+
+            <span class="search-icon">⌕</span>
+
+            <input
+              id="q"
+              type="text"
+              placeholder="Search groups..."
+            >
+
+          </div>
+
+
+          <div class="actions">
+
+            <button class="ghost small" id="selAll">
+              Select Visible
+            </button>
+
+            <button class="ghost small" id="selInvert">
+              Invert Visible
+            </button>
+
+            <button class="ghost small" id="selNone">
+              Clear Selection
+            </button>
+
+            <span class="summary grow" id="count">
+              0 selected
+            </span>
+
+            <button class="ghost small" id="reloadGroups">
+              Refresh
+            </button>
+
+            <button class="ghost small" id="saveSendList">
+              Save as List
+            </button>
+
+          </div>
+
+
+          <div class="summary" id="summary">
+            Showing 0 of 0 groups
+          </div>
+
+          <div class="list" id="groupList"></div>
+
+        </div>
+
+
+        <!-- ===================================================
+             LIST MODE
+             =================================================== -->
+
+        <div id="send-lists" class="panel" hidden>
+
+          <div class="summary">
+            Use a saved list. Saved lists are shared with the other group tools.
+          </div>
+
+          <div id="listsBox"></div>
+
+        </div>
+
+
+        <!-- Send button -->
+
+        <div class="actions">
+
+          <button id="sendBtn" class="grow">
+            Send Message
+          </button>
+
+        </div>
+
+        <div class="error" id="sendError"></div>
+
+
+        <!-- ===================================================
+             SEND JOB
+             =================================================== -->
+
+        <div class="job" id="job">
+
+          <div class="job-top">
+            <strong id="jobState">Queued</strong>
+            <span class="summary" id="jobCurrent"></span>
+          </div>
+
+
+          <div class="job-stats">
+
+            <span>
+              Processed:
+              <b id="jobDone">0/0</b>
+            </span>
+
+            <span>
+              Sent:
+              <b id="jobSuccess">0</b>
+            </span>
+
+            <span>
+              Failed:
+              <b id="jobFailed">0</b>
+            </span>
+
+          </div>
+
+
+          <div class="progress-track">
+            <div class="progress-bar" id="jobBar"></div>
+          </div>
+
+
+          <div class="result-list" id="jobResults"></div>
+
+
+          <div class="actions">
+
+            <button
+              class="ghost small"
+              id="cancelJob"
+              hidden
+            >
+              Cancel Sending
+            </button>
+
+          </div>
+
+        </div>
+
+      </div>
+
+
+      <!-- =======================================================
+           READ / CHECK MESSAGE PANEL
+           ======================================================= -->
+
+      <div id="readPanel" class="panel" hidden>
+
+
+        <!-- Read mode tabs -->
+
+        <div class="tabs" id="readTabs">
+
+          <button class="on" data-read="unread">
+            Unread Messages
+          </button>
+
+          <button data-read="total">
+            Total Messages
+          </button>
+
+        </div>
+
+
+        <!-- Search + Refresh -->
+
+        <div class="read-toolbar">
+
+          <div class="search-wrap">
+
+            <span class="search-icon">⌕</span>
+
+            <input
+              id="readSearch"
+              type="text"
+              placeholder="Search groups..."
+            >
+
+          </div>
+
+          <button
+            class="ghost small"
+            id="refreshRead"
+          >
+            Refresh
+          </button>
+
+        </div>
+
+
+        <!-- Summary -->
+
+        <div class="read-summary">
+
+          <span>
+            Groups:
+            <b id="readGroups">0</b>
+          </span>
+
+          <span>
+            Messages:
+            <b id="readMessages">0</b>
+          </span>
+
+          <span>
+            Last sync:
+            <b id="lastSync">Waiting…</b>
+          </span>
+
+        </div>
+
+
+        <!-- ===================================================
+             MESSAGE TABLE
+             =================================================== -->
+
+        <div class="table-wrap">
+
+          <table>
+
+            <thead>
+
+              <tr>
+
+                <th>
+                  Group
+                </th>
+
+                <th id="metricHead">
+                  Unread Messages
+                </th>
+
+              </tr>
+
+            </thead>
+
+            <tbody id="readBody"></tbody>
+
+          </table>
+
+        </div>
+
+
+        <!-- Export / list actions -->
+
+        <div class="actions">
+
+          <button
+            class="ghost small"
+            id="copyList"
+          >
+            Copy List
+          </button>
+
+          <button
+            class="ghost small"
+            id="txtList"
+          >
+            List TXT
+          </button>
+
+          <button
+            class="ghost small"
+            id="csvList"
+          >
+            List CSV
+          </button>
+
+          <button
+            class="ghost small"
+            id="messageTagsList"
+            title="Create a separate Tags List from groups that have reached a message requirement"
+          >
+            Tags List
+          </button>
+
+        </div>
+
+
+        <div class="summary">
+          Live sync is active. The table updates automatically when WhatsApp
+          delivers message or chat-state events.
+        </div>
+
+      </div>
+
+
+      <!-- =======================================================
+           MESSAGE TAGS MODAL
+           ======================================================= -->
+
+      <div
+        class="modal-backdrop"
+        id="messageTagsModal"
+        hidden
+      >
+
+        <div
+          class="modal-card"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="messageTagsTitle"
+        >
+
+          <div class="modal-head">
+
+            <div>
+
+              <h3 id="messageTagsTitle">
+                Create Message Tags List
+              </h3>
+
+              <p>
+                Only groups that have reached the required number of messages
+                will be included.
+              </p>
+
+            </div>
+
+
+            <button
+              class="icon-btn"
+              id="closeMessageTags"
+              type="button"
+              aria-label="Close"
+            >
+              ×
+            </button>
+
+          </div>
+
+
+          <label
+            class="modal-label"
+            for="messageRequirement"
+          >
+            Minimum messages required
+          </label>
+
+
+          <input
+            id="messageRequirement"
+            class="modal-input"
+            type="number"
+            min="1"
+            step="1"
+            inputmode="numeric"
+            placeholder="e.g. 5"
+          >
+
+
+          <label
+            class="modal-check"
+            for="messageTagsWithMessages"
+          >
+
+            <input
+              id="messageTagsWithMessages"
+              type="checkbox"
+            >
+
+            <span>
+              Do you want tags with messages?
+            </span>
+
+          </label>
+
+
+          <div
+            class="modal-hint"
+            id="messageTagsModeHint"
+          >
+            By default, tags will be created empty. Turn this on to include
+            the message count in each tag.
+          </div>
+
+
+          <div
+            class="modal-error"
+            id="messageTagsError"
+          ></div>
+
+
+          <div class="modal-actions">
+
+            <button
+              class="ghost small"
+              id="cancelMessageTags"
+              type="button"
+            >
+              Cancel
+            </button>
+
+            <button
+              class="small"
+              id="createMessageTags"
+              type="button"
+            >
+              Create Tags List
+            </button>
+
+          </div>
+
+        </div>
+
+      </div>
+
+    </section>
+
+  </main>
+
+
+  <!-- =========================================================
+       FOOTER
+       ========================================================= -->
+
+  <footer class="footer">
+    Developed by <b>Vikki Prime</b>
+  </footer>
+
+
+  <!-- =========================================================
+       JAVASCRIPT
+       ========================================================= -->
+
+  <script>
+
+    /* =========================================================
+       BASIC HELPERS
+       ========================================================= */
+
+    const $ = id => document.getElementById(id);
+
+    const wait = ms =>
+      new Promise(resolve => setTimeout(resolve, ms));
+
+    const esc = value =>
+      String(value ?? '').replace(
+        /[&<>"']/g,
+        char => ({
+          '&': '&amp;',
+          '<': '&lt;',
+          '>': '&gt;',
+          '"': '&quot;',
+          "'": '&#39;'
+        }[char])
+      );
+
+
+    /* =========================================================
+       API HELPER
+       ========================================================= */
+
+    const api = async (url, body, options = {}) => {
+
+      const method = String(
+        options.method ||
+        (body !== undefined ? 'POST' : 'GET')
+      ).toUpperCase();
+
+      const requestOptions = {
+        credentials: 'same-origin',
+        ...options,
+        method
+      };
+
+      if (
+        body !== undefined &&
+        method !== 'GET' &&
+        method !== 'HEAD'
+      ) {
+        requestOptions.headers = {
+          'Content-Type': 'application/json',
+          ...(options.headers || {})
+        };
+
+        requestOptions.body = JSON.stringify(body);
+      }
+
+      let lastError;
+
+      for (let i = 0; i < 3; i++) {
+
+        try {
+
+          const response = await fetch(url, requestOptions);
+
+          const json =
+            await response.json().catch(() => ({}));
+
+          if (!response.ok) {
+            throw Object.assign(
+              new Error(json.error || 'Request failed'),
+              {
+                status: response.status
+              }
+            );
+          }
+
+          return json;
+
+        } catch (error) {
+
+          lastError = error;
+
+          if (
+            error?.status &&
+            ![502, 503, 504].includes(error.status)
+          ) {
+            throw error;
+          }
+
+          if (i < 2) {
+            await wait(450 * (i + 1));
+          }
+
+        }
+      }
+
+      throw lastError ||
+        new Error('Network request failed');
+    };
+
+
+    /* =========================================================
+       GLOBAL STATE
+       ========================================================= */
+
+    let groups = [];
+    let lists = [];
+    let selected = new Set();
+
+    let sendMode = 'range';
+    let selectedListIds = null;
+
+    let readMode = 'unread';
+    let rows = [];
+
+    let jobId = null;
+    let stream = null;
+
+
+    /* =========================================================
+       WHATSAPP CONNECTION STATUS
+       ========================================================= */
+
+    function updateWa(state) {
+
+      $('waStatus').className =
+        'status ' +
+        (state === 'connected'
+          ? 'live'
+          : 'disconnected');
+
+      $('waText').textContent =
+        state === 'connected'
+          ? 'Connected'
+          : 'Disconnected';
+    }
+
+
+    async function gate() {
+
+      try {
+
+        const me = await api('/api/me');
+
+        if (!me.loggedIn) {
+          location.replace('/dashboard.html');
+          return false;
+        }
+
+        const status = await api('/api/status');
+
+        updateWa(
+          status.state === 'connected'
+            ? 'connected'
+            : 'disconnected'
+        );
+
+        return status.state === 'connected';
+
+      } catch {
+
+        location.replace('/dashboard.html');
+        return false;
+      }
+    }
+
+
+    /* =========================================================
+       MAIN TAB SWITCHING
+       ========================================================= */
+
+    function setMainTab(tab) {
+
+      $('mainTabs')
+        .querySelectorAll('button')
+        .forEach(button => {
+          button.classList.toggle(
+            'on',
+            button.dataset.tab === tab
+          );
+        });
+
+      $('sendPanel').hidden =
+        tab !== 'send';
+
+      $('readPanel').hidden =
+        tab !== 'read';
+
+      if (tab === 'read') {
+        refreshRead();
+      }
+    }
+
+
+    $('mainTabs').onclick = event => {
+
+      if (event.target.dataset.tab) {
+        setMainTab(event.target.dataset.tab);
+      }
+    };
+
+
+    /* =========================================================
+       MESSAGE COUNTER
+       ========================================================= */
+
+    $('message').oninput = () => {
+
+      $('counter').textContent =
+        `${$('message').value.length} / 4096`;
+    };
+
+
+    /* =========================================================
+       SEND MODE SWITCHING
+       ========================================================= */
+
+    function setSendMode(mode) {
+
+      sendMode = mode;
+
+      $('sendModes')
+        .querySelectorAll('button')
+        .forEach(button => {
+
+          button.classList.toggle(
+            'on',
+            button.dataset.mode === mode
+          );
+
+        });
+
+      ['range', 'select', 'lists'].forEach(type => {
+
+        $('send-' + type).hidden =
+          type !== mode;
+
+      });
+
+      selectedListIds = null;
+
+      if (mode === 'select') {
+        loadGroups();
+      }
+
+      if (mode === 'lists') {
+        loadLists();
+      }
+
+      if (mode === 'range') {
+        updateRange();
+      }
+    }
+
+
+    $('sendModes').onclick = event => {
+
+      if (event.target.dataset.mode) {
+        setSendMode(event.target.dataset.mode);
+      }
+    };
+
+
+    /* =========================================================
+       GROUP LOADING
+       ========================================================= */
+
+    async function loadGroups(refresh = false) {
+
+      try {
+
+        const data = await api(
+          '/api/groups' +
+          (refresh ? '?refresh=1' : '')
+        );
+
+        groups = data.groups || [];
+
+        [...selected].forEach(id => {
+
+          if (!groups.some(group => group.id === id)) {
+            selected.delete(id);
+          }
+
+        });
+
+        renderPicker();
+        updateRange();
+
+      } catch (error) {
+
+        $('sendError').textContent =
+          error.message;
+      }
+    }
+
+
+    function visible() {
+
+      const query =
+        $('q').value.trim().toLowerCase();
+
+      return groups.filter(group =>
+        !query ||
+        group.name.toLowerCase().includes(query)
+      );
+    }
+
+
+    function renderPicker() {
+
+      const visibleGroups = visible();
+
+      $('groupList').innerHTML =
+        visibleGroups.length
+
+          ? visibleGroups.map(group => `
+              <label class="item">
+
+                <input
+                  type="checkbox"
+                  data-id="${esc(group.id)}"
+                  ${selected.has(group.id) ? 'checked' : ''}
+                >
+
+                <span class="n">
+                  ${esc(group.name)}
+                </span>
+
+                <span class="s">
+                  ${group.size}
+                </span>
+
+              </label>
+            `).join('')
+
+          : `
+              <div class="item summary">
+                No groups found.
+              </div>
+            `;
+
+      $('count').textContent =
+        `${selected.size} selected`;
+
+      $('summary').textContent =
+        `Showing ${visibleGroups.length} of ${groups.length} groups`;
+    }
+
+
+    $('groupList').onchange = event => {
+
+      if (event.target.type !== 'checkbox') {
+        return;
+      }
+
+      if (event.target.checked) {
+        selected.add(event.target.dataset.id);
+      } else {
+        selected.delete(event.target.dataset.id);
+      }
+
+      $('count').textContent =
+        `${selected.size} selected`;
+    };
+
+
+    $('q').oninput = renderPicker;
+
+
+    $('selAll').onclick = () => {
+
+      visible().forEach(group => {
+        selected.add(group.id);
+      });
+
+      renderPicker();
+    };
+
+
+    $('selInvert').onclick = () => {
+
+      visible().forEach(group => {
+
+        if (selected.has(group.id)) {
+          selected.delete(group.id);
+        } else {
+          selected.add(group.id);
+        }
+
+      });
+
+      renderPicker();
+    };
+
+
+    $('selNone').onclick = () => {
+
+      selected.clear();
+      renderPicker();
+    };
+
+
+    $('reloadGroups').onclick = () =>
+      loadGroups(true);
+
+
+    /* =========================================================
+       RANGE MODE
+       ========================================================= */
+
+    function rangeIds() {
+
+      const from = Number($('from').value);
+      const to = Number($('to').value);
+      const prefix = $('prefix').value.trim();
+
+      if (
+        !prefix ||
+        !Number.isInteger(from) ||
+        !Number.isInteger(to) ||
+        from > to
+      ) {
+        return [];
+      }
+
+      return groups
+        .filter(group =>
+          group.name.startsWith(prefix) &&
+          (() => {
+
+            const match =
+              group.name.match(/(\d+)\s*$/);
+
+            return (
+              match &&
+              Number(match[1]) >= from &&
+              Number(match[1]) <= to
+            );
+
+          })()
+        )
+        .map(group => group.id);
+    }
+
+
+    function updateRange() {
+
+      const ids = rangeIds();
+
+      $('rangeSummary').textContent =
+        ids.length
+          ? `${ids.length} groups match this range.`
+          : 'Enter a prefix and range to select matching groups.';
+    }
+
+
+    $('prefix').oninput = updateRange;
+    $('from').oninput = updateRange;
+    $('to').oninput = updateRange;
+
+
+    /* =========================================================
+       SAVED LISTS
+       ========================================================= */
+
+    async function loadLists() {
+
+      try {
+
+        if (!groups.length) {
+          await loadGroups();
+        }
+
+        lists =
+          (await api('/api/lists')).lists || [];
+
+        renderLists();
+
+      } catch (error) {
+
+        $('sendError').textContent =
+          error.message;
+      }
+    }
+
+
+    function renderLists() {
+
+      if (!lists.length) {
+
+        $('listsBox').innerHTML = `
+          <div class="summary">
+            No saved lists yet.
+          </div>
+        `;
+
+        return;
+      }
+
+      const names =
+        new Map(
+          groups.map(group => [
+            group.id,
+            group.name
+          ])
+        );
+
+      $('listsBox').innerHTML =
+        lists.map((list, index) => `
+
+          <div class="list-card">
+
+            <div class="top">
+
+              <b>
+                ${esc(list.name)}
+              </b>
+
+              <span class="list-count">
+                ${list.ids.length} groups
+              </span>
+
+            </div>
+
+            <div class="summary">
+
+              ${esc(
+                list.ids
+                  .map(id => names.get(id))
+                  .filter(Boolean)
+                  .slice(0, 3)
+                  .join(', ') ||
+                'Saved group selection'
+              )}
+
+              ${list.ids.length > 3
+                ? ' + more'
+                : ''}
+
+            </div>
+
+            <button
+              class="small"
+              data-use="${index}"
+            >
+              Use this list
+            </button>
+
+          </div>
+
+        `).join('');
+    }
+
+
+    $('listsBox').onclick = event => {
+
+      const button =
+        event.target.closest('[data-use]');
+
+      if (!button) {
+        return;
+      }
+
+      const list =
+        lists[Number(button.dataset.use)];
+
+      selectedListIds =
+        [...new Set(list.ids)];
+
+      $('sendError').textContent =
+        `"${list.name}" selected · ${selectedListIds.length} groups ready.`;
+    };
+
+
+    $('saveSendList').onclick = async () => {
+
+      if (!selected.size) {
+
+        $('sendError').textContent =
+          'Please select at least one group.';
+
+        return;
+      }
+
+      const name =
+        prompt('Enter a list name:');
+
+      if (!name) {
+        return;
+      }
+
+      try {
+
+        lists =
+          (await api('/api/lists', {
+            name,
+            ids: [...selected]
+          })).lists || [];
+
+        $('sendError').textContent =
+          `"${name}" has been saved successfully.`;
+
+      } catch (error) {
+
+        $('sendError').textContent =
+          error.message;
+      }
+    };
+
+
+    /* =========================================================
+       SEND TARGET IDS
+       ========================================================= */
+
+    function targetIds() {
+
+      if (sendMode === 'range') {
+
+        const ids = rangeIds();
+
+        if (!ids.length) {
+          throw new Error(
+            'No groups match the selected range.'
+          );
+        }
+
+        return ids;
+      }
+
+
+      if (sendMode === 'select') {
+
+        if (!selected.size) {
+          throw new Error(
+            'Please select at least one group.'
+          );
+        }
+
+        return [...selected];
+      }
+
+
+      if (!selectedListIds?.length) {
+        throw new Error(
+          'Choose a saved list first.'
+        );
+      }
+
+      return [...selectedListIds];
+    }
+
+
+    /* =========================================================
+       SEND JOB RENDERING
+       ========================================================= */
+
+    function renderJob(job) {
+
+      $('job').classList.add('show');
+
+      $('cancelJob').disabled = false;
+
+      $('jobState').textContent =
+        job.state === 'finished'
+          ? 'Completed'
+          : job.state === 'cancelled'
+            ? 'Cancelled'
+            : job.state === 'cancelling'
+              ? 'Cancelling…'
+              : job.state === 'error'
+                ? 'Stopped'
+                : job.state === 'running'
+                  ? 'Sending…'
+                  : 'Queued';
+
+      $('jobDone').textContent =
+        `${job.done}/${job.total}`;
+
+      $('jobSuccess').textContent =
+        job.success;
+
+      $('jobFailed').textContent =
+        job.failed;
+
+      $('jobBar').style.width =
+        (
+          job.total
+            ? Math.round(
+                job.done / job.total * 100
+              )
+            : 0
+        ) + '%';
+
+      $('jobCurrent').textContent =
+        job.current
+          ? `Processing ${job.current.index}/${job.current.total}: ${job.current.name}`
+          : (job.error || '');
+
+      $('jobResults').innerHTML =
+        (job.results || [])
+          .map(result => `
+
+            <div class="result-row">
+
+              <span class="${result.status === 'success' ? 'ok' : 'bad'}">
+                ${result.status === 'success' ? '✓' : '✕'}
+              </span>
+
+              <span class="name">
+                ${esc(result.name)}
+              </span>
+
+              ${
+                result.error
+                  ? `
+                    <span class="bad">
+                      ${esc(result.error)}
+                    </span>
+                  `
+                  : ''
+              }
+
+            </div>
+
+          `)
+          .join('');
+
+      $('cancelJob').hidden =
+        !['queued', 'running'].includes(job.state);
+    }
+
+
+    /* =========================================================
+       CANCEL SEND JOB
+       ========================================================= */
+
+    $('cancelJob').onclick = async () => {
+
+      if (!jobId) {
+        return;
+      }
+
+      const id = jobId;
+
+      $('cancelJob').disabled = true;
+
+      try {
+
+        const data =
+          await api(
+            '/api/messages/jobs/' +
+            encodeURIComponent(id) +
+            '/cancel',
+            {}
+          );
+
+        if (data.job) {
+          renderJob(data.job);
+        }
+
+      } catch (error) {
+
+        $('sendError').textContent =
+          error.message;
+
+        $('cancelJob').disabled = false;
+      }
+    };
+
+
+    /* =========================================================
+       SEND MESSAGE
+       ========================================================= */
+
+    async function sendMessage() {
+
+      try {
+
+        $('sendError').textContent = '';
+
+        const message =
+          $('message').value.trim();
+
+        const ids =
+          targetIds();
+
+        if (!message) {
+          throw new Error(
+            'Enter a message first.'
+          );
+        }
+
+        $('sendBtn').disabled = true;
+
+        const data =
+          await api('/api/messages/send', {
+            message,
+            groupIds: ids
+          });
+
+        jobId =
+          data.job.id;
+
+        renderJob(data.job);
+
+        $('sendBtn').disabled = false;
+
+      } catch (error) {
+
+        $('sendError').textContent =
+          error.message;
+
+        $('sendBtn').disabled = false;
+      }
+    }
+
+
+    $('sendBtn').onclick =
+      sendMessage;
+
+
+    /* =========================================================
+       READ MESSAGE SNAPSHOT
+       ========================================================= */
+
+    function applySnapshot(data) {
+
+      rows =
+        data.rows || [];
+
+      if (data.lastSync) {
+
+        $('lastSync').textContent =
+          new Date(
+            data.lastSync
+          ).toLocaleTimeString();
+      }
+
+      renderRead();
+    }
+
+
+    /* =========================================================
+       FILTER READ TABLE
+       ========================================================= */
+
+    function filteredRead() {
+
+      const query =
+        $('readSearch').value
+          .trim()
+          .toLowerCase();
+
+      return rows
+        .filter(row =>
+          !query ||
+          row.name
+            .toLowerCase()
+            .includes(query)
+        )
+        .filter(row =>
+          readMode === 'unread'
+            ? row.unread > 0
+            : true
+        );
+    }
+
+
+    /* =========================================================
+       RENDER READ TABLE
+       ========================================================= */
+
+    function renderRead() {
+
+      const list =
+        filteredRead();
+
+      $('metricHead').textContent =
+        readMode === 'unread'
+          ? 'Unread Messages'
+          : 'Total Messages';
+
+      $('readBody').innerHTML =
+        list.length
+
+          ? list.map(row => {
+
+              const unread =
+                Math.max(
+                  0,
+                  Number(row.unread) || 0
+                );
+
+              const total =
+                Math.max(
+                  0,
+                  Number(row.total) || 0
+                );
+
+              return `
+                <tr>
+
+                  <td>
+                    ${esc(row.name)}
+                  </td>
+
+                  <td class="metric">
+                    ${
+                      readMode === 'unread'
+                        ? unread
+                        : total
+                    }
+                  </td>
+
+                </tr>
+              `;
+
+            }).join('')
+
+          : `
+              <tr>
+                <td
+                  colspan="2"
+                  class="empty"
+                >
+                  No matching groups.
+                </td>
+              </tr>
+            `;
+
+
+      $('readGroups').textContent =
+        list.length;
+
+
+      $('readMessages').textContent =
+        list.reduce(
+          (sum, row) =>
+            sum +
+            (
+              readMode === 'unread'
+                ? Math.max(
+                    0,
+                    Number(row.unread) || 0
+                  )
+                : Math.max(
+                    0,
+                    Number(row.total) || 0
+                  )
+            ),
+          0
+        );
+    }
+
+
+    $('readSearch').oninput =
+      renderRead;
+
+
+    /* =========================================================
+       READ MODE SWITCHING
+       ========================================================= */
+
+    $('readTabs').onclick = event => {
+
+      if (!event.target.dataset.read) {
+        return;
+      }
+
+      readMode =
+        event.target.dataset.read;
+
+      $('readTabs')
+        .querySelectorAll('button')
+        .forEach(button => {
+
+          button.classList.toggle(
+            'on',
+            button.dataset.read === readMode
+          );
+
+        });
+
+      renderRead();
+    };
+
+
+    /* =========================================================
+       READ DATA REFRESH
+       ========================================================= */
+
+    async function refreshRead() {
+
+      try {
+
+        const data =
+          await api(
+            '/api/messages/overview',
+            undefined,
+            {
+              method: 'GET'
+            }
+          );
+
+        applySnapshot(data);
+
+      } catch (error) {
+
+        $('sendError').textContent =
+          error.message;
+      }
+    }
+
+
+    $('refreshRead').onclick =
+      async () => {
+
+        try {
+
+          const data =
+            await api(
+              '/api/messages/refresh',
+              {}
+            );
+
+          applySnapshot(data);
+
+        } catch (error) {
+
+          $('sendError').textContent =
+            error.message;
+        }
+      };
+
+
+    /* =========================================================
+       EXPORT HELPERS
+       ========================================================= */
+
+    function exportLines() {
+
+      return filteredRead().map(row => [
+        row.name,
+        readMode === 'unread'
+          ? row.unread
+          : row.total
+      ]);
+    }
+
+
+    function listText() {
+
+      return exportLines()
+        .map(([name, count]) =>
+          `${name}= ${count}`
+        )
+        .join('\n');
+    }
+
+
+    /* =========================================================
+       COPY LIST
+       ========================================================= */
+
+    $('copyList').onclick =
+      async () => {
+
+        try {
+
+          await navigator.clipboard.writeText(
+            listText()
+          );
+
+          $('copyList').textContent =
+            'Copied ✓';
+
+          setTimeout(() => {
+
+            $('copyList').textContent =
+              'Copy List';
+
+          }, 1200);
+
+        } catch {
+
+          $('sendError').textContent =
+            'Could not copy the list.';
+        }
+      };
+
+
+    /* =========================================================
+       DOWNLOAD HELPER
+       ========================================================= */
+
+    function download(
+      name,
+      type,
+      body
+    ) {
+
+      const link =
+        document.createElement('a');
+
+      link.href =
+        URL.createObjectURL(
+          new Blob(
+            [body],
+            { type }
+          )
+        );
+
+      link.download =
+        name;
+
+      link.click();
+
+      setTimeout(
+        () =>
+          URL.revokeObjectURL(
+            link.href
+          ),
+        1000
+      );
+    }
+
+
+    /* =========================================================
+       TXT EXPORT
+       ========================================================= */
+
+    $('txtList').onclick = () => {
+
+      download(
+        `message-${readMode}-list.txt`,
+        'text/plain;charset=utf-8',
+        'GROUPS           ' +
+        (
+          readMode === 'unread'
+            ? 'UNREAD MESSAGES'
+            : 'TOTAL MESSAGES'
+        ) +
+        '\n' +
+        listText()
+      );
+    };
+
+
+    /* =========================================================
+       CSV EXPORT
+       ========================================================= */
+
+    $('csvList').onclick = () => {
+
+      const escCsv = value => {
+
+        value =
+          String(value ?? '');
+
+        return /[",\n]/.test(value)
+          ? `"${value.replace(/"/g, '""')}"`
+          : value;
+      };
+
+
+      const body =
+        [
+          [
+            'GROUPS',
+            readMode === 'unread'
+              ? 'UNREAD MESSAGES'
+              : 'TOTAL MESSAGES'
+          ],
+          ...exportLines()
+        ]
+          .map(row =>
+            row.map(escCsv).join(',')
+          )
+          .join('\r\n');
+
+
+      download(
+        `message-${readMode}-list.csv`,
+        'text/csv;charset=utf-8',
+        '\uFEFF' + body
+      );
+    };
+
+
+    /* =========================================================
+       MESSAGE TAGS MODAL
+       ========================================================= */
+
+    function openMessageTagsModal() {
+
+      $('messageTagsError').textContent =
+        '';
+
+      $('messageRequirement').value =
+        '';
+
+      $('messageTagsWithMessages').checked =
+        false;
+
+      $('messageTagsModeHint').textContent =
+        'By default, tags will be created empty. Turn this on to include the message count in each tag.';
+
+      $('messageTagsModal').hidden =
+        false;
+
+      setTimeout(
+        () =>
+          $('messageRequirement').focus(),
+        30
+      );
+    }
+
+
+    function updateMessageTagsModeHint() {
+
+      $('messageTagsModeHint').textContent =
+        $('messageTagsWithMessages').checked
+
+          ? 'Tags will include the group message count.'
+
+          : 'Tags will be created empty; the message count will not be added to the tags.';
+    }
+
+
+    $('messageTagsWithMessages').onchange =
+      updateMessageTagsModeHint;
+
+
+    function closeMessageTagsModal() {
+
+      $('messageTagsModal').hidden =
+        true;
+    }
+
+
+    $('messageTagsList').onclick =
+      openMessageTagsModal;
+
+
+    $('closeMessageTags').onclick =
+      closeMessageTagsModal;
+
+
+    $('cancelMessageTags').onclick =
+      closeMessageTagsModal;
+
+
+    $('messageTagsModal').addEventListener(
+      'click',
+      event => {
+
+        if (
+          event.target ===
+          $('messageTagsModal')
+        ) {
+          closeMessageTagsModal();
+        }
+
+      }
+    );
+
+
+    $('messageRequirement').addEventListener(
+      'keydown',
+      event => {
+
+        if (event.key === 'Enter') {
+          $('createMessageTags').click();
+        }
+
+        if (event.key === 'Escape') {
+          closeMessageTagsModal();
+        }
+
+      }
+    );
+
+
+    /* =========================================================
+       CREATE MESSAGE TAGS
+       ========================================================= */
+
+    async function createMessageTags() {
+
+      const requirement =
+        Number(
+          $('messageRequirement').value
+        );
+
+
+      if (
+        !Number.isInteger(requirement) ||
+        requirement < 1
+      ) {
+
+        $('messageTagsError').textContent =
+          'Enter a valid minimum message count (1 or more).';
+
+        $('messageRequirement').focus();
+
+        return;
+      }
+
+
+      const button =
+        $('createMessageTags');
+
+      const includeMessages =
+        $('messageTagsWithMessages').checked;
+
+
+      button.disabled =
+        true;
+
+      $('messageTagsError').textContent =
+        '';
+
+
+      try {
+
+        const fresh =
+          await api(
+            '/api/messages/refresh',
+            {}
+          );
+
+        applySnapshot(fresh);
+
+
+        const metric =
+          'total';
+
+
+        const eligible =
+          (fresh.rows || [])
+            .filter(row =>
+              Math.max(
+                0,
+                Number(row?.[metric]) || 0
+              ) >= requirement
+            )
+            .map(row => ({
+
+              name:
+                String(row.name || ''),
+
+              members:
+                includeMessages
+                  ? Math.max(
+                      0,
+                      Number(row?.[metric]) || 0
+                    )
+                  : 0,
+
+              country: ''
+
+            }));
+
+
+        if (!eligible.length) {
+
+          throw new Error(
+            `No groups have reached ${requirement} total messages yet.`
+          );
+        }
+
+
+        sessionStorage.setItem(
+          'waMessageTagsImport',
+          JSON.stringify({
+
+            version: 2,
+
+            source:
+              'message-manager',
+
+            metric,
+
+            requirement,
+
+            includeMessages,
+
+            createdAt:
+              Date.now(),
+
+            groups:
+              eligible
+
+          })
+        );
+
+
+        sessionStorage.setItem(
+          'waMessageTagsOpened',
+          '1'
+        );
+
+
+        window.location.href =
+          '/tags-list.html';
+
+
+      } catch (error) {
+
+        $('messageTagsError').textContent =
+          error.message ||
+          'Could not create Message Tags List.';
+
+      } finally {
+
+        button.disabled =
+          false;
+      }
+    }
+
+
+    $('createMessageTags').onclick =
+      createMessageTags;
+
+
+    /* =========================================================
+       LIVE EVENT STREAM
+       ========================================================= */
+
+    function connectStream() {
+
+      if (stream) {
+        stream.close();
+      }
+
+
+      stream =
+        new EventSource(
+          '/api/messages/stream'
+        );
+
+
+      /* -------------------------------------------------------
+         Full snapshot event
+         ------------------------------------------------------- */
+
+      stream.addEventListener(
+        'snapshot',
+        event => {
+
+          try {
+
+            applySnapshot(
+              JSON.parse(event.data)
+            );
+
+          } catch {
+            // Ignore malformed stream data.
+          }
+
+        }
+      );
+
+
+      /* -------------------------------------------------------
+         Updated rows event
+         ------------------------------------------------------- */
+
+      stream.addEventListener(
+        'rows',
+        event => {
+
+          try {
+
+            const data =
+              JSON.parse(event.data);
+
+
+            const changed =
+              new Map(
+                (data.rows || [])
+                  .map(row => [
+                    row.id,
+                    row
+                  ])
+              );
+
+
+            rows =
+              rows.map(row =>
+                changed.get(row.id) || row
+              );
+
+
+            for (const row of data.rows || []) {
+
+              if (
+                !rows.some(
+                  existing =>
+                    existing.id === row.id
+                )
+              ) {
+                rows.push(row);
+              }
+
+            }
+
+
+            rows.sort(
+              (a, b) =>
+                (a.num - b.num) ||
+                a.name.localeCompare(b.name)
+            );
+
+
+            if (data.lastSync) {
+
+              $('lastSync').textContent =
+                new Date(
+                  data.lastSync
+                ).toLocaleTimeString();
+            }
+
+
+            renderRead();
+
+          } catch {
+            // Ignore malformed stream data.
+          }
+
+        }
+      );
+
+
+      /* -------------------------------------------------------
+         Send progress event
+         ------------------------------------------------------- */
+
+      stream.addEventListener(
+        'send-progress',
+        event => {
+
+          try {
+
+            const job =
+              JSON.parse(event.data).job;
+
+            if (
+              !jobId ||
+              job.id === jobId
+            ) {
+              renderJob(job);
+            }
+
+          } catch {
+            // Ignore malformed stream data.
+          }
+
+        }
+      );
+
+
+      /* -------------------------------------------------------
+         Stream error
+         ------------------------------------------------------- */
+
+      stream.onerror = () =>
+        updateWa('disconnected');
+    }
+
+
+    /* =========================================================
+       INITIAL PAGE LOAD
+       ========================================================= */
+
+    (async () => {
+
+      if (await gate()) {
+
+        await loadGroups();
+
+        await refreshRead();
+
+        connectStream();
+      }
+
+    })();
+
+  </script>
+
 </body>
+
 </html>
