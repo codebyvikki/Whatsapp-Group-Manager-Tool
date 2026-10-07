@@ -1576,7 +1576,7 @@ export function createStats(ctx) {
         lines
           .map(
             ([group, count]) =>
-              `${group}= ${count}`
+              `${group} = ${count}`
           )
           .join('\n');
 
@@ -1589,7 +1589,7 @@ export function createStats(ctx) {
         );
 
       txt +=
-        `\n\nTOTAL= ${total}`;
+        `\n\nTOTAL = ${total}`;
 
     } else if (tab === 'added') {
       txt =
@@ -1597,7 +1597,7 @@ export function createStats(ctx) {
         lines
           .map(
             ([group, count]) =>
-              `${group}= ${count}`
+              `${group} = ${count}`
           )
           .join('\n');
 
@@ -1610,7 +1610,7 @@ export function createStats(ctx) {
         );
 
       txt +=
-        `\n\nTOTAL= ${total}`;
+        `\n\nTOTAL = ${total}`;
 
     } else if (tab === 'pending') {
       txt =
@@ -1618,7 +1618,7 @@ export function createStats(ctx) {
         lines
           .map(
             ([group, count]) =>
-              `${group}= ${count}`
+              `${group} = ${count}`
           )
           .join('\n');
 
@@ -1631,7 +1631,7 @@ export function createStats(ctx) {
         );
 
       txt +=
-        `\n\nTOTAL= ${total}`;
+        `\n\nTOTAL = ${total}`;
 
     } else if (tab === 'link') {
       txt =
@@ -1639,7 +1639,7 @@ export function createStats(ctx) {
         lines
           .map(
             ([group, count]) =>
-              `${group}= ${count}`
+              `${group} = ${count}`
           )
           .join('\n');
 
@@ -1652,7 +1652,7 @@ export function createStats(ctx) {
         );
 
       txt +=
-        `\n\nTOTAL= ${total}`;
+        `\n\nTOTAL = ${total}`;
     }
 
     return {
