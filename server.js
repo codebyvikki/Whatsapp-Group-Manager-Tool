@@ -925,7 +925,7 @@ async function startWA(userId) {
       version,
       auth: auth.state,
       logger: pino({ level: 'silent' }),
-      browser: ['Link Organizer', 'Chrome', '1.0']
+      browser: ['Whatsapp Group Manager', 'Chrome', '1.0']
     });
 
     wa.sock = currentSocket;
