@@ -1420,6 +1420,23 @@ async function loadBackups(){
 }
 
 async function saveBackup(){
+    /*
+       Every explicit Save Backup action creates a NEW history entry.
+       Loading an old backup and editing it must never overwrite the old entry.
+       This behavior is intentionally limited to Message Manager; Live Stats
+       keeps its existing save behavior unchanged.
+    */
+    if(tagsListSource === 'message-manager'){
+        const groupCount = Array.isArray(data) ? data.length : 0;
+        const suggested = `Message Tags - ${groupCount} groups - ${new Date().toLocaleString()}`;
+        let name = prompt('Enter a name for this Tags List backup:', suggested);
+        if(name===null) return;
+        name = name.trim();
+        if(!name){ alert('Please enter a backup name.'); return; }
+        await saveBackupWithName(name, { createNew: true });
+        return;
+    }
+
     let name = activeBackupName;
     if(!name){
         name = prompt('Enter a name for this Tags List backup:', 'My Tags List');
@@ -1430,23 +1447,46 @@ async function saveBackup(){
     await saveBackupWithName(name);
 }
 
-async function saveBackupWithName(name){
+function makeUniqueMessageBackupName(name){
+    const base = String(name || '').trim();
+    if(!base) return '';
+    const names = new Set(tagBackups.map(function(b){ return String(b?.name || '').trim().toLowerCase(); }));
+    if(!names.has(base.toLowerCase())) return base;
+
+    let n = 2;
+    let candidate = `${base} (${n})`;
+    while(names.has(candidate.toLowerCase())){
+        n += 1;
+        candidate = `${base} (${n})`;
+    }
+    return candidate;
+}
+
+async function saveBackupWithName(name, options){
     if(tagsListSource==='message-manager'){
         if(!currentUserId) currentUserId=await getCurrentUserForTags();
         if(!currentUserId){
             alert('Please log in to save this Message Tags List.');
             return;
         }
+
+        const createNew = options?.createNew === true;
+        const backupName = createNew ? makeUniqueMessageBackupName(name) : String(name || '').trim();
+        if(!backupName){
+            alert('Please enter a backup name.');
+            return;
+        }
+
         const snapshot=buildTagSnapshot();
         try{
             const result=await apiJSON('/api/tag-backups',{
                 method:'POST',
-                body:JSON.stringify({name, snapshot:snapshot, source:'message-manager'})
+                body:JSON.stringify({name:backupName, snapshot:snapshot, source:'message-manager', createNew:createNew})
             });
             tagBackups=Array.isArray(result.backups)?result.backups:[];
-            activeBackupName=name;
+            activeBackupName=createNew ? backupName : backupName;
             renderBackupOptions();
-            $('backupStatus').textContent='Message Tags saved to your account + browser offline copy';
+            $('backupStatus').textContent='Message Tags saved as a new history entry';
             try{ writeLocalSavedList(snapshot); }catch(localError){ console.warn(localError); }
         }catch(e){
             try{
@@ -1549,7 +1589,14 @@ function queueBackupAutosave(){
     clearTimeout(backupAutosaveTimer);
     backupAutosaveTimer=setTimeout(function(){
         try{ writeLocalSavedList(buildTagSnapshot()); }catch(e){ console.warn('[tags-local-save]',e); }
-        if(activeBackupName){
+
+        /*
+           Do not silently rewrite an existing Message Manager history entry
+           when the current list is edited. A new history entry is created
+           only when the user explicitly presses Save Backup.
+           Live Stats behavior remains unchanged.
+        */
+        if(tagsListSource !== 'message-manager' && activeBackupName){
             saveBackupWithName(activeBackupName).catch(function(){});
         }
     },1200);

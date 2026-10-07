@@ -3728,30 +3728,64 @@ async function getUserTagBackups(userId, source = 'stats') {
     : [];
 }
 
-async function saveUserTagBackup(userId, name, snapshot, source = 'stats') {
+async function saveUserTagBackup(userId, name, snapshot, source = 'stats', createNew = false) {
   const uid = String(userId);
-  const cleanName = String(name || '').trim();
+  let cleanName = String(name || '').trim();
   if (!cleanName || cleanName.length > 80) throw new Error('Backup name must be 1-80 characters.');
 
   const cleanSnapshot = cleanTagBackup({ snapshot });
   const now = Date.now();
-  const record = { userId: uid, name: cleanName, snapshot: cleanSnapshot, updatedAt: now };
   const isMessageManager = source === 'message-manager';
   const collectionName = isMessageManager ? 'messageTagBackups' : 'tagBackups';
   const memoryStore = isMessageManager ? appData.messageTagBackupsByUser : appData.tagBackupsByUser;
   const d = await getDb();
 
+  /*
+     Message Manager backups are an append-only history. Even if the user
+     supplies the same name, a new save must never replace an older snapshot.
+     Live Stats keeps its existing name-based update behavior.
+  */
+  if (isMessageManager && createNew) {
+    const makeUnique = (existingNames) => {
+      const lower = new Set(existingNames.map((x) => String(x || '').toLowerCase()));
+      if (!lower.has(cleanName.toLowerCase())) return cleanName;
+      let n = 2;
+      let candidate = `${cleanName} (${n})`;
+      while (lower.has(candidate.toLowerCase())) {
+        n += 1;
+        candidate = `${cleanName} (${n})`;
+      }
+      return candidate;
+    };
+
+    if (d) {
+      const existing = await d.collection(collectionName)
+        .find({ userId: uid }, { projection: { _id: 0, name: 1 } })
+        .toArray();
+      cleanName = makeUnique(existing.map((x) => x.name));
+    } else {
+      const existing = Array.isArray(memoryStore[uid]) ? memoryStore[uid] : [];
+      cleanName = makeUnique(existing.map((x) => x.name));
+    }
+  }
+
+  const record = { userId: uid, name: cleanName, snapshot: cleanSnapshot, updatedAt: now };
+
   if (d) {
-    await d.collection(collectionName).replaceOne(
-      { userId: uid, name: cleanName },
-      record,
-      { upsert: true }
-    );
+    if (isMessageManager && createNew) {
+      await d.collection(collectionName).insertOne(record);
+    } else {
+      await d.collection(collectionName).replaceOne(
+        { userId: uid, name: cleanName },
+        record,
+        { upsert: true }
+      );
+    }
   } else {
     if (!memoryStore[uid]) memoryStore[uid] = [];
     const list = memoryStore[uid];
     const i = list.findIndex((x) => x.name === cleanName);
-    if (i >= 0) list[i] = record;
+    if (i >= 0 && !(isMessageManager && createNew)) list[i] = record;
     else list.push(record);
     await saveData();
   }
@@ -3796,7 +3830,8 @@ app.post('/api/tag-backups', requireAuth, async (req, res) => {
     if (!name || name.length > 80) return res.status(400).json({ error: 'Enter a backup name (1-80 characters).' });
     const snapshot = req.body?.snapshot;
     if (!snapshot || !Array.isArray(snapshot.groups)) return res.status(400).json({ error: 'Invalid Tags List backup.' });
-    const record = await saveUserTagBackup(req.user.userId, name, snapshot, source);
+    const createNew = source === 'message-manager' && req.body?.createNew === true;
+    const record = await saveUserTagBackup(req.user.userId, name, snapshot, source, createNew);
     res.json({ ok: true, backup: record, backups: await getUserTagBackups(req.user.userId, source) });
   } catch (e) {
     res.status(400).json({ error: e.message || 'Could not save Tags List backup' });
