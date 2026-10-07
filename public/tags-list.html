@@ -1097,22 +1097,33 @@ const defaults=[{"name":"Booking 限时推广 BF2","members":0,"country":"USA"},
    Receives the current Live Stats tab (Pending / Invite links / Added / Total members)
    through same-origin sessionStorage, then hands the data to the existing Tags UI. */
 let importedTagPayload = null;
-let tagsListSource = 'stats';
+
+/*
+   Keep the Tags page tied to the section that opened it.
+   The source is carried in the URL so a browser reload (including
+   mobile Desktop-site switches) cannot silently fall back to Live Stats.
+   sessionStorage remains the one-time hand-off for the initial dataset.
+*/
+const tagsSourceParam = new URLSearchParams(window.location.search).get('source');
+let tagsListSource = tagsSourceParam === 'message-manager' ? 'message-manager' : 'stats';
+
 try {
     const messageRaw = sessionStorage.getItem("waMessageTagsImport");
     const statsRaw = sessionStorage.getItem("waTagsImport");
     const messagePayload = messageRaw ? JSON.parse(messageRaw) : null;
     const statsPayload = statsRaw ? JSON.parse(statsRaw) : null;
 
-    /* Message Manager Tags use a completely separate dataset from Live Stats Tags. */
-    if(messagePayload && Array.isArray(messagePayload.groups) && messagePayload.groups.length){
+    /*
+       Only consume the payload belonging to the requested source.
+       On later reloads the source stays in the URL and the persisted
+       source-specific localStorage namespace is used instead.
+    */
+    if(tagsListSource === 'message-manager' && messagePayload && Array.isArray(messagePayload.groups)){
         importedTagPayload = messagePayload;
-        tagsListSource = 'message-manager';
         sessionStorage.removeItem("waMessageTagsImport");
         sessionStorage.removeItem("waMessageTagsOpened");
-    }else if(statsPayload && Array.isArray(statsPayload.groups) && statsPayload.groups.length){
+    }else if(tagsListSource === 'stats' && statsPayload && Array.isArray(statsPayload.groups)){
         importedTagPayload = statsPayload;
-        tagsListSource = 'stats';
         sessionStorage.removeItem("waTagsImport");
         sessionStorage.removeItem("waTagsOpenedFromStats");
     }
@@ -1349,7 +1360,7 @@ document.getElementById('savedBackupCards')?.addEventListener('click', async fun
         if(!backup) return;
         if(!confirm(`Delete saved Tags List "${backup.name}"? This cannot be undone.`)) return;
         try{
-            const result=await apiJSON('/api/tag-backups/delete',{method:'POST',body:JSON.stringify({name:backup.name})});
+            const result=await apiJSON('/api/tag-backups/delete',{method:'POST',body:JSON.stringify({name:backup.name, source:tagsListSource})});
             tagBackups=Array.isArray(result.backups)?result.backups:[];
             if(activeBackupName===backup.name) activeBackupName='';
             renderBackupOptions();
@@ -1377,15 +1388,6 @@ async function getCurrentUserForTags(){
 
 async function loadBackups(){
     currentUserId=await getCurrentUserForTags();
-    if(tagsListSource==='message-manager'){
-        tagBackups=[];
-        backupReady=true;
-        renderBackupOptions();
-        $('backupStatus').textContent = readLocalSavedList()
-            ? 'Message Tags browser copy available offline'
-            : 'Message Tags use separate browser storage';
-        return;
-    }
     if(!currentUserId){
         $('backupStatus').textContent='Login required';
         renderBackupOptions();
@@ -1393,22 +1395,27 @@ async function loadBackups(){
     }
 
     try{
-        const result = await apiJSON('/api/tag-backups', { method:'GET' });
+        const result = await apiJSON('/api/tag-backups?source=' + encodeURIComponent(tagsListSource), { method:'GET' });
         tagBackups = Array.isArray(result.backups) ? result.backups : [];
         backupReady = true;
         renderBackupOptions();
         $('backupStatus').textContent = tagBackups.length
             ? `${tagBackups.length} saved list${tagBackups.length===1?'':'s'} · browser copy available offline`
-            : (readLocalSavedList() ? 'Browser saved copy available offline' : 'No saved lists yet');
+            : (readLocalSavedList()
+                ? (tagsListSource==='message-manager' ? 'Message Tags browser copy available offline' : 'Browser saved copy available offline')
+                : 'No saved lists yet');
     }catch(e){
         console.error('[tag-backups]', e);
-        // Do not lose the user's backup just because the cloud endpoint is unavailable.
         tagBackups=[];
         backupReady=true;
         renderBackupOptions();
         $('backupStatus').textContent = readLocalSavedList()
-            ? 'Cloud backup unavailable · browser copy is available offline'
-            : 'Cloud backup unavailable · Save List will use browser storage';
+            ? (tagsListSource==='message-manager'
+                ? 'Message Tags cloud backup unavailable · browser copy is available offline'
+                : 'Cloud backup unavailable · browser copy is available offline')
+            : (tagsListSource==='message-manager'
+                ? 'Message Tags cloud backup unavailable · Save will use browser storage'
+                : 'Cloud backup unavailable · Save will use browser storage');
     }
 }
 
@@ -1427,17 +1434,30 @@ async function saveBackupWithName(name){
     if(tagsListSource==='message-manager'){
         if(!currentUserId) currentUserId=await getCurrentUserForTags();
         if(!currentUserId){
-            alert('Please log in to save this Message Tags List in browser storage.');
+            alert('Please log in to save this Message Tags List.');
             return;
         }
         const snapshot=buildTagSnapshot();
         try{
-            writeLocalSavedList(snapshot);
-            activeBackupName='';
+            const result=await apiJSON('/api/tag-backups',{
+                method:'POST',
+                body:JSON.stringify({name, snapshot:snapshot, source:'message-manager'})
+            });
+            tagBackups=Array.isArray(result.backups)?result.backups:[];
+            activeBackupName=name;
             renderBackupOptions();
-            $('backupStatus').textContent='Message Tags saved in separate browser storage';
+            $('backupStatus').textContent='Message Tags saved to your account + browser offline copy';
+            try{ writeLocalSavedList(snapshot); }catch(localError){ console.warn(localError); }
         }catch(e){
-            alert(e.message || 'Could not save Message Tags List.');
+            try{
+                writeLocalSavedList(snapshot);
+                activeBackupName='';
+                renderBackupOptions();
+                $('backupStatus').textContent='Server backup unavailable · Message Tags saved in browser offline';
+                alert('Server backup unavailable, so the Message Tags List was saved safely in this browser instead.');
+            }catch(localError){
+                alert(e.message || localError.message || 'Could not save Message Tags List.');
+            }
         }
         return;
     }
@@ -1512,7 +1532,7 @@ async function deleteSelectedBackup(){
     try{
         const result=await apiJSON('/api/tag-backups/delete',{
             method:'POST',
-            body:JSON.stringify({name})
+            body:JSON.stringify({name, source:tagsListSource})
         });
         tagBackups=Array.isArray(result.backups)?result.backups:[];
         if(activeBackupName===name) activeBackupName='';

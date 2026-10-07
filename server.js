@@ -186,6 +186,7 @@ async function getDb() {
         db.collection('lists').createIndex({ userId: 1, name: 1 }, { unique: true }),
         db.collection('groupDeleterLists').createIndex({ userId: 1, name: 1 }, { unique: true }),
         db.collection('tagBackups').createIndex({ userId: 1, name: 1 }, { unique: true }),
+        db.collection('messageTagBackups').createIndex({ userId: 1, name: 1 }, { unique: true }),
         db.collection('sessions').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
         db.collection('bulkJobs').createIndex({ userId: 1, type: 1, state: 1, updatedAt: -1 }),
         db.collection('bulkJobs').createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 })
@@ -223,6 +224,7 @@ let appData = {
   listsByUser: {},
   groupDeleterListsByUser: {},
   tagBackupsByUser: {},
+  messageTagBackupsByUser: {},
   creatorDailyByUser: {},
   creatorHistoryByUser: {}
 };
@@ -238,6 +240,7 @@ async function loadData() {
         listsByUser: doc?.listsByUser || {},
         groupDeleterListsByUser: doc?.groupDeleterListsByUser || {},
         tagBackupsByUser: doc?.tagBackupsByUser || {},
+        messageTagBackupsByUser: doc?.messageTagBackupsByUser || {},
         creatorDailyByUser: doc?.creatorDailyByUser || {},
         creatorHistoryByUser: doc?.creatorHistoryByUser || {}
       };
@@ -251,6 +254,7 @@ async function loadData() {
         listsByUser: j.listsByUser || {},
         groupDeleterListsByUser: j.groupDeleterListsByUser || {},
         tagBackupsByUser: j.tagBackupsByUser || {},
+        messageTagBackupsByUser: j.messageTagBackupsByUser || {},
         creatorDailyByUser: j.creatorDailyByUser || {},
         creatorHistoryByUser: j.creatorHistoryByUser || {}
       };
@@ -258,7 +262,7 @@ async function loadData() {
     }
   } catch (e) {
     console.error('[storage] loadData:', e.message);
-    appData = { codes: {}, codesByUser: {}, listsByUser: {}, groupDeleterListsByUser: {}, tagBackupsByUser: {}, creatorDailyByUser: {}, creatorHistoryByUser: {}, _legacyLists: [] };
+    appData = { codes: {}, codesByUser: {}, listsByUser: {}, groupDeleterListsByUser: {}, tagBackupsByUser: {}, messageTagBackupsByUser: {}, creatorDailyByUser: {}, creatorHistoryByUser: {}, _legacyLists: [] };
   }
 }
 
@@ -270,6 +274,7 @@ async function saveData() {
     listsByUser: appData.listsByUser || {},
     groupDeleterListsByUser: appData.groupDeleterListsByUser || {},
     tagBackupsByUser: appData.tagBackupsByUser || {},
+    messageTagBackupsByUser: appData.messageTagBackupsByUser || {},
     creatorDailyByUser: appData.creatorDailyByUser || {},
     creatorHistoryByUser: appData.creatorHistoryByUser || {}
   };
@@ -403,6 +408,7 @@ async function deleteUser(id) {
     await d.collection('lists').deleteMany({ userId: id });
     await d.collection('groupDeleterLists').deleteMany({ userId: id });
     await d.collection('tagBackups').deleteMany({ userId: id });
+    await d.collection('messageTagBackups').deleteMany({ userId: id });
     return;
   }
 
@@ -412,6 +418,8 @@ async function deleteUser(id) {
   delete appData.groupDeleterListsByUser[id];
   appData.tagBackupsByUser = appData.tagBackupsByUser || {};
   delete appData.tagBackupsByUser[id];
+  appData.messageTagBackupsByUser = appData.messageTagBackupsByUser || {};
+  delete appData.messageTagBackupsByUser[id];
   await saveData();
 }
 
@@ -925,7 +933,7 @@ async function startWA(userId) {
       version,
       auth: auth.state,
       logger: pino({ level: 'silent' }),
-      browser: ['Whatsapp Group Manager', 'Chrome', '1.0']
+      browser: ['Link Organizer', 'Chrome', '1.0']
     });
 
     wa.sock = currentSocket;
@@ -3701,21 +3709,26 @@ function cleanTagBackup(value) {
   };
 }
 
-async function getUserTagBackups(userId) {
+async function getUserTagBackups(userId, source = 'stats') {
   const uid = String(userId);
+  const isMessageManager = source === 'message-manager';
+  const collectionName = isMessageManager ? 'messageTagBackups' : 'tagBackups';
+  const memoryStore = isMessageManager ? appData.messageTagBackupsByUser : appData.tagBackupsByUser;
   const d = await getDb();
+
   if (d) {
-    return d.collection('tagBackups')
+    return d.collection(collectionName)
       .find({ userId: uid }, { projection: { _id: 0, userId: 0 } })
       .sort({ updatedAt: -1, name: 1 })
       .toArray();
   }
-  return Array.isArray(appData.tagBackupsByUser?.[uid])
-    ? [...appData.tagBackupsByUser[uid]].sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))
+
+  return Array.isArray(memoryStore?.[uid])
+    ? [...memoryStore[uid]].sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))
     : [];
 }
 
-async function saveUserTagBackup(userId, name, snapshot) {
+async function saveUserTagBackup(userId, name, snapshot, source = 'stats') {
   const uid = String(userId);
   const cleanName = String(name || '').trim();
   if (!cleanName || cleanName.length > 80) throw new Error('Backup name must be 1-80 characters.');
@@ -3723,17 +3736,20 @@ async function saveUserTagBackup(userId, name, snapshot) {
   const cleanSnapshot = cleanTagBackup({ snapshot });
   const now = Date.now();
   const record = { userId: uid, name: cleanName, snapshot: cleanSnapshot, updatedAt: now };
+  const isMessageManager = source === 'message-manager';
+  const collectionName = isMessageManager ? 'messageTagBackups' : 'tagBackups';
+  const memoryStore = isMessageManager ? appData.messageTagBackupsByUser : appData.tagBackupsByUser;
   const d = await getDb();
 
   if (d) {
-    await d.collection('tagBackups').replaceOne(
+    await d.collection(collectionName).replaceOne(
       { userId: uid, name: cleanName },
       record,
       { upsert: true }
     );
   } else {
-    if (!appData.tagBackupsByUser[uid]) appData.tagBackupsByUser[uid] = [];
-    const list = appData.tagBackupsByUser[uid];
+    if (!memoryStore[uid]) memoryStore[uid] = [];
+    const list = memoryStore[uid];
     const i = list.findIndex((x) => x.name === cleanName);
     if (i >= 0) list[i] = record;
     else list.push(record);
@@ -3742,21 +3758,32 @@ async function saveUserTagBackup(userId, name, snapshot) {
   return record;
 }
 
-async function deleteUserTagBackup(userId, name) {
+async function deleteUserTagBackup(userId, name, source = 'stats') {
   const uid = String(userId);
   const cleanName = String(name || '');
+  const isMessageManager = source === 'message-manager';
+  const collectionName = isMessageManager ? 'messageTagBackups' : 'tagBackups';
+  const memoryStore = isMessageManager ? appData.messageTagBackupsByUser : appData.tagBackupsByUser;
   const d = await getDb();
+
   if (d) {
-    await d.collection('tagBackups').deleteOne({ userId: uid, name: cleanName });
+    await d.collection(collectionName).deleteOne({ userId: uid, name: cleanName });
   } else {
-    appData.tagBackupsByUser[uid] = (appData.tagBackupsByUser[uid] || []).filter((x) => x.name !== cleanName);
+    memoryStore[uid] = (memoryStore[uid] || []).filter((x) => x.name !== cleanName);
     await saveData();
   }
 }
 
+function getTagBackupSource(req) {
+  return String(req.query?.source || req.body?.source || '').trim() === 'message-manager'
+    ? 'message-manager'
+    : 'stats';
+}
+
 app.get('/api/tag-backups', requireAuth, async (req, res) => {
   try {
-    res.json({ backups: await getUserTagBackups(req.user.userId) });
+    const source = getTagBackupSource(req);
+    res.json({ backups: await getUserTagBackups(req.user.userId, source) });
   } catch (e) {
     res.status(500).json({ error: 'Could not load saved Tags Lists' });
   }
@@ -3764,12 +3791,13 @@ app.get('/api/tag-backups', requireAuth, async (req, res) => {
 
 app.post('/api/tag-backups', requireAuth, async (req, res) => {
   try {
+    const source = getTagBackupSource(req);
     const name = String(req.body?.name || '').trim();
     if (!name || name.length > 80) return res.status(400).json({ error: 'Enter a backup name (1-80 characters).' });
     const snapshot = req.body?.snapshot;
     if (!snapshot || !Array.isArray(snapshot.groups)) return res.status(400).json({ error: 'Invalid Tags List backup.' });
-    const record = await saveUserTagBackup(req.user.userId, name, snapshot);
-    res.json({ ok: true, backup: record, backups: await getUserTagBackups(req.user.userId) });
+    const record = await saveUserTagBackup(req.user.userId, name, snapshot, source);
+    res.json({ ok: true, backup: record, backups: await getUserTagBackups(req.user.userId, source) });
   } catch (e) {
     res.status(400).json({ error: e.message || 'Could not save Tags List backup' });
   }
@@ -3777,9 +3805,10 @@ app.post('/api/tag-backups', requireAuth, async (req, res) => {
 
 app.post('/api/tag-backups/delete', requireAuth, async (req, res) => {
   try {
+    const source = getTagBackupSource(req);
     const name = String(req.body?.name || '');
-    await deleteUserTagBackup(req.user.userId, name);
-    res.json({ ok: true, backups: await getUserTagBackups(req.user.userId) });
+    await deleteUserTagBackup(req.user.userId, name, source);
+    res.json({ ok: true, backups: await getUserTagBackups(req.user.userId, source) });
   } catch (e) {
     res.status(500).json({ error: 'Could not delete Tags List backup' });
   }
