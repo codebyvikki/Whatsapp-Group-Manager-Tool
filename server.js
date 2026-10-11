@@ -495,6 +495,36 @@ async function migrateLegacyLists(adminId) {
 ========================================================= */
 
 const waSessions = new Map();
+let baileysVersionPromise = null;
+
+function getCachedBaileysVersion() {
+  if (!baileysVersionPromise) {
+    baileysVersionPromise = (async () => {
+      let timeout;
+      try {
+        const latest = await Promise.race([
+          fetchLatestBaileysVersion().then((result) => result.version),
+          new Promise((resolve) => {
+            timeout = setTimeout(() => resolve(null), 5000);
+          })
+        ]);
+        // If the version endpoint is slow/unreachable, use the version bundled
+        // with the installed Baileys package rather than blocking QR startup.
+        return latest || [2, 3000, 1043857760];
+      } catch {
+        return [2, 3000, 1043857760];
+      } finally {
+        if (timeout) clearTimeout(timeout);
+      }
+    })();
+  }
+  return baileysVersionPromise;
+}
+
+function isInvalidWhatsAppAuthCode(code) {
+  return code === DisconnectReason.loggedOut || code === DisconnectReason.badSession ||
+    code === DisconnectReason.forbidden || code === DisconnectReason.multideviceMismatch;
+}
 
 function userAuthPath(userId) {
   const safe = String(userId || 'unknown').replace(/[^A-Za-z0-9_-]/g, '_');
@@ -510,7 +540,9 @@ function createWAContext(userId) {
     startPromise: null,
     manualStop: false,
     reconnectTimer: null,
+    connectionTimer: null,
     reconnectDelay: 2000,
+    lastError: null,
     groupCache: { at: 0, data: null },
     codeCache: new Map(),
     codeInflight: new Map(),
@@ -742,6 +774,13 @@ function clearReconnectTimer(wa) {
   }
 }
 
+function clearWAConnectionTimer(wa) {
+  if (wa.connectionTimer) {
+    clearTimeout(wa.connectionTimer);
+    wa.connectionTimer = null;
+  }
+}
+
 function scheduleWAReconnect(wa) {
   if (wa.manualStop || wa.state === 'closed' || wa.reconnectTimer || wa.startPromise) return;
   const delay = wa.reconnectDelay;
@@ -776,6 +815,7 @@ async function disposeWA(userId, clearAuthState = true) {
   }
 
   clearReconnectTimer(wa);
+  clearWAConnectionTimer(wa);
   const current = wa.sock;
   wa.sock = null;
   wa.state = 'closed';
@@ -928,7 +968,8 @@ async function startWA(userId) {
       } catch {}
     }
 
-    const { version } = await fetchLatestBaileysVersion();
+    // Reuse the Baileys version lookup across user logins.
+    const version = await getCachedBaileysVersion();
     const currentSocket = makeWASocket({
       version,
       auth: auth.state,
@@ -937,7 +978,31 @@ async function startWA(userId) {
     });
 
     wa.sock = currentSocket;
+    wa.lastError = null;
     currentSocket.ev.on('creds.update', auth.saveCreds);
+
+    // Avoid an endless spinner if an old registered session never completes
+    // its handshake and never emits a QR or close event.
+    clearWAConnectionTimer(wa);
+    if (auth.state.creds?.registered) {
+      wa.connectionTimer = setTimeout(async () => {
+        if (wa.sock !== currentSocket || wa.state === 'connected' ||
+            wa.state === 'qr' || wa.manualStop) return;
+        console.warn(`[wa:${wa.userId}] Existing session handshake timed out; resetting stale auth.`);
+        wa.lastError = 'The previous WhatsApp session could not reconnect. A fresh QR is being prepared.';
+        wa.sock = null;
+        wa.state = 'starting';
+        wa.qrDataUrl = null;
+        try { currentSocket.end(new Error('WhatsApp session handshake timed out')); } catch {}
+        await clearWAAuth(wa).catch((e) => console.error(`[wa:${wa.userId}] stale auth cleanup failed:`, e.message));
+        if (!wa.manualStop) {
+          setTimeout(() => startWA(wa.userId).catch((e) => {
+            wa.lastError = `Could not start a fresh WhatsApp session: ${e.message}`;
+            console.error(`[wa:${wa.userId}] fresh QR after timeout failed:`, e.message);
+          }), 250);
+        }
+      }, 30000);
+    }
 
     if (!wa.statsLoaded) {
       wa.statsLoaded = true;
@@ -970,6 +1035,8 @@ async function startWA(userId) {
       }
 
       if (connection === 'open') {
+        clearWAConnectionTimer(wa);
+        wa.lastError = null;
         wa.state = 'connected';
         wa.qrDataUrl = null;
         wa.reconnectDelay = 2000;
@@ -981,22 +1048,29 @@ async function startWA(userId) {
       }
 
       if (connection === 'close') {
+        clearWAConnectionTimer(wa);
         if (wa.sock === currentSocket) wa.sock = null;
         wa.groupCache = { at: 0, data: null };
         wa.codeCache.clear();
         const code = lastDisconnect?.error?.output?.statusCode;
+        const disconnectMessage = lastDisconnect?.error?.message || 'WhatsApp connection closed';
 
-        if (code === DisconnectReason.loggedOut) {
-          wa.state = wa.manualStop ? 'idle' : 'closed';
+        if (isInvalidWhatsAppAuthCode(code)) {
+          wa.state = wa.manualStop ? 'idle' : 'starting';
           wa.qrDataUrl = null;
-          await clearWAAuth(wa);
+          wa.lastError = `The previous WhatsApp session is no longer valid (${code}). Preparing a new QR code.`;
+          await clearWAAuth(wa).catch((e) => console.error(`[wa:${wa.userId}] auth cleanup failed:`, e.message));
           wa.reconnectDelay = 2000;
           if (!wa.manualStop) {
-            startWA(wa.userId).catch((e) => console.error(`[wa:${wa.userId}] fresh QR start:`, e.message));
+            setTimeout(() => startWA(wa.userId).catch((e) => {
+              wa.lastError = `Could not start a fresh WhatsApp session: ${e.message}`;
+              console.error(`[wa:${wa.userId}] fresh QR start:`, e.message);
+            }), 250);
           }
         } else {
           wa.state = wa.manualStop ? 'idle' : 'starting';
           wa.qrDataUrl = null;
+          wa.lastError = wa.manualStop ? null : disconnectMessage;
           if (!wa.manualStop) scheduleWAReconnect(wa);
         }
       }
@@ -1006,7 +1080,9 @@ async function startWA(userId) {
   try {
     return await wa.startPromise;
   } catch (e) {
+    clearWAConnectionTimer(wa);
     wa.state = 'starting';
+    wa.lastError = e?.message || 'WhatsApp could not start';
     wa.sock = null;
     scheduleWAReconnect(wa);
     throw e;
@@ -1383,6 +1459,7 @@ app.get('/api/status', requireAuth, async (req, res) => {
     state: wa.state,
     connected,
     qr: wa.qrDataUrl,
+    error: wa.lastError,
     canDisconnect: wa.state !== 'idle',
     owner: req.user.userId,
     checkedAt: Date.now()
@@ -1402,12 +1479,14 @@ app.post('/api/start-wa', requireAuth, async (req, res) => {
 
     if (refresh) {
       clearReconnectTimer(wa);
+      clearWAConnectionTimer(wa);
       wa.manualStop = true;
 
       const current = wa.sock;
       wa.sock = null;
       wa.qrDataUrl = null;
       wa.state = 'idle';
+      wa.lastError = null;
 
       if (current) {
         try { current.end(undefined); } catch {}
@@ -1423,7 +1502,8 @@ app.post('/api/start-wa', requireAuth, async (req, res) => {
   } catch (e) {
     wa.state = 'idle';
     wa.qrDataUrl = null;
-    res.status(500).json({ error: 'Could not start WhatsApp: ' + e.message });
+    wa.lastError = 'Could not start WhatsApp: ' + e.message;
+    res.status(500).json({ error: wa.lastError });
   }
 });
 
