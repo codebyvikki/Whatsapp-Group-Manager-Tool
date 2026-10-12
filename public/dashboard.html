@@ -2922,15 +2922,20 @@ async function poll(){
         return;
       }
 
-      /*
-       * QR connection screen.
-       */
-      showConnection();
+      // A saved session can briefly report idle/connecting while Baileys
+      // restores the socket. Keep the dashboard visible during that recovery;
+      // never flash the QR page unless the server confirms QR/no saved session.
+      const restoringSavedSession =
+        s.hasSavedSession === true &&
+        ['idle', 'starting', 'connecting'].includes(s.state);
 
-      setConnectionView(
-        s.state,
-        hasQr
-      );
+      if (restoringSavedSession) {
+        showDashboard();
+        setConnectionView('connected', false);
+      } else {
+        showConnection();
+        setConnectionView(s.state, hasQr);
+      }
     }
 
   } catch (e) {
@@ -2994,7 +2999,11 @@ async function boot(){
     updateConnectionStatus('idle');
     updateHeaderStatus('idle');
     setConnectionView('idle', false);
-    showConnection();
+    // Render the dashboard shell immediately after profile authentication.
+    // poll() will switch to QR only if no saved WhatsApp session exists or
+    // WhatsApp explicitly requires a fresh link. This avoids QR-page flicker
+    // during ordinary navigation back from tools.
+    showDashboard();
     if (currentUser.role === 'admin') {
       try {
         const status = await api('/api/status');
@@ -3002,9 +3011,11 @@ async function boot(){
           adminChoicePending = false;
           poll();
         } else {
+          showConnection();
           showAdminConnectionChoice();
         }
       } catch {
+        showConnection();
         showAdminConnectionChoice();
       }
     } else {
