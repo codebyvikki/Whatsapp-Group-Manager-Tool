@@ -1392,6 +1392,14 @@
             Refresh
           </button>
 
+          <button
+            class="small"
+            id="markAllRead"
+            title="Mark all currently tracked unread group messages as read"
+          >
+            Mark as Read
+          </button>
+
         </div>
 
 
@@ -2643,26 +2651,35 @@
     }
 
 
-    $('refreshRead').onclick =
-      async () => {
+    $('refreshRead').onclick = async () => {
+      try {
+        const data = await api('/api/messages/refresh', {});
+        applySnapshot(data);
+      } catch (error) {
+        $('sendError').textContent = error.message;
+      }
+    };
 
-        try {
-
-          const data =
-            await api(
-              '/api/messages/refresh',
-              {}
-            );
-
-          applySnapshot(data);
-
-        } catch (error) {
-
-          $('sendError').textContent =
-            error.message;
-        }
-      };
-
+    $('markAllRead').onclick = async () => {
+      const button = $('markAllRead');
+      button.disabled = true;
+      const oldText = button.textContent;
+      button.textContent = 'Marking…';
+      try {
+        const result = await api('/api/messages/mark-read', {});
+        if (result.overview) applySnapshot(result.overview);
+        else await refreshRead();
+        button.textContent = `Marked ${Number(result.marked) || 0}`;
+      } catch (error) {
+        alert(error.message || 'Could not mark messages as read.');
+        button.textContent = oldText;
+      } finally {
+        button.disabled = false;
+        setTimeout(() => {
+          if (button.textContent.startsWith('Marked ')) button.textContent = oldText;
+        }, 2200);
+      }
+    };
 
     /* =========================================================
        EXPORT HELPERS

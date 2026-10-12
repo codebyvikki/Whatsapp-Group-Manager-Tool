@@ -1143,8 +1143,13 @@ if(tagSourceNavBtn && tagsListSource === 'message-manager'){
 const TAGS_DATA_KEY = tagsListSource === 'message-manager'
     ? 'groupManagerMessageTagsData'
     : 'groupManagerData';
-const tagStorageKey = (key) =>
-    tagsListSource === 'message-manager' ? `messageTags::${key}` : key;
+const tagStorageKey = (key) => {
+    const sourcePrefix = tagsListSource === 'message-manager' ? 'messageTags' : 'statsTags';
+    // Brand settings and list defaults belong to the logged-in panel profile,
+    // not merely to the browser or the Tags List entry point.
+    const uid = localStorage.getItem(`${sourcePrefix}::tagsLastUserId`) || 'guest';
+    return `${sourcePrefix}::${uid}::${key}`;
+};
 
 
 let data = importedTagPayload
@@ -1374,14 +1379,14 @@ async function getCurrentUserForTags(){
         const me=await apiJSON('/api/me');
         if(me?.loggedIn && me.user?.id){
             currentUserId=String(me.user.id);
-            localStorage.setItem(tagStorageKey('tagsLastUserId'), currentUserId);
+            localStorage.setItem((tagsListSource === 'message-manager' ? 'messageTags' : 'statsTags') + '::tagsLastUserId', currentUserId);
             return currentUserId;
         }
         currentUserId='';
         return '';
     }catch(e){
         // Offline fallback: use the last profile ID only for browser-local data.
-        currentUserId=localStorage.getItem(tagStorageKey('tagsLastUserId')) || '';
+        currentUserId=localStorage.getItem((tagsListSource === 'message-manager' ? 'messageTags' : 'statsTags') + '::tagsLastUserId') || ''; 
         return currentUserId;
     }
 }
@@ -1664,7 +1669,7 @@ function editProfile(){
     $("profileName").textContent = cleanName;
 
     localStorage.setItem(
-        "profileName",
+        tagStorageKey("profileName"),
         cleanName
     );
 
@@ -1693,7 +1698,7 @@ function editTagline(){
     $("profileTagline").textContent = cleanTagline;
 
     localStorage.setItem(
-        "profileTagline",
+        tagStorageKey("profileTagline"),
         cleanTagline
     );
 
@@ -1737,7 +1742,7 @@ function uploadProfileLogo(event){
         /* Save logo */
 
         localStorage.setItem(
-            "profileLogo",
+            tagStorageKey("profileLogo"),
             e.target.result
         );
 
@@ -1772,6 +1777,13 @@ function applyTagsSourceUi(){
 }
 
 function loadProfile(){
+    // Migrate older unscoped branding once, then keep each panel profile's
+    // company identity in its own local namespace across refreshes/logins.
+    ['profileName','profileTagline','profileLogo'].forEach(function(key){
+        const scoped = localStorage.getItem(tagStorageKey(key));
+        const legacy = localStorage.getItem(key);
+        if(!scoped && legacy) localStorage.setItem(tagStorageKey(key), legacy);
+    });
 
     const savedName =
         localStorage.getItem(tagStorageKey("profileName"));
@@ -2616,8 +2628,9 @@ render();
 updateSelectedColor();
 resizeCountryInput();
 
-/* Load per-user cloud backups after the existing Tags UI is ready. */
-loadBackups();
+/* Resolve the logged-in profile first, then load its saved company branding.
+   This prevents a previous profile's logo/name flashing on a new login. */
+loadBackups().then(() => loadProfile());
 </script>
 </body>
 </html>

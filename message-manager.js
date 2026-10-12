@@ -417,6 +417,25 @@ export function createMessageManager(ctx) {
     sock.ev.on('groups.update', (list = []) => touch(list.map((g) => g?.id)));
   }
 
+  async function markAllUnreadRead() {
+    const sock = getSock();
+    if (!sock) throw new Error('WhatsApp is not connected');
+    const targets = [...unreadMessageIds.entries()].filter(([, ids]) => ids && ids.size);
+    const keys = targets.flatMap(([jid, ids]) => [...ids].map((id) => ({ remoteJid: jid, id, fromMe: false })));
+    if (!keys.length) {
+      // Also reconcile any chat-level unread counters that arrived without
+      // individual message IDs.
+      for (const [jid, count] of counts) if (count.unread > 0) clearUnreadMessages(jid);
+      touch([...counts.keys()]);
+      return { marked: 0, groups: 0 };
+    }
+    // Only clear our counters after WhatsApp accepts the read receipts.
+    await sock.readMessages(keys);
+    for (const [jid] of targets) clearUnreadMessages(jid);
+    touch(targets.map(([jid]) => jid));
+    return { marked: keys.length, groups: targets.length };
+  }
+
   async function refresh() {
     if (!getSock()) throw new Error('WhatsApp is not connected');
     if (typeof refreshGroups === 'function') await refreshGroups();
@@ -549,6 +568,7 @@ export function createMessageManager(ctx) {
   return {
     attach,
     refresh,
+    markAllUnreadRead,
     overview,
     getJob,
     startSend,
@@ -562,6 +582,15 @@ export function createMessageManager(ctx) {
 export function registerMessageRoutes(app, requireAuth, needWA, getMessageManager) {
   app.get('/api/messages/overview', requireAuth, needWA, (req, res) => {
     res.json(getMessageManager(req.user.userId).overview());
+  });
+
+  app.post('/api/messages/mark-read', requireAuth, needWA, async (req, res) => {
+    try {
+      const result = await getMessageManager(req.user.userId).markAllUnreadRead();
+      res.json({ ok: true, ...result, overview: getMessageManager(req.user.userId).overview() });
+    } catch (e) {
+      res.status(400).json({ error: e?.message || 'Could not mark unread messages as read' });
+    }
   });
 
   app.post('/api/messages/refresh', requireAuth, needWA, async (req, res) => {
