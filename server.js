@@ -20,8 +20,7 @@ import { createStats, registerStatsRoutes } from './stats.js';
 import { createMessageManager, registerMessageRoutes } from './message-manager.js';
 import makeWASocket, {
   useMultiFileAuthState,
-  DisconnectReason,
-  fetchLatestBaileysVersion
+  DisconnectReason
 } from '@whiskeysockets/baileys';
 
 const PORT = Number(process.env.PORT || 3000);
@@ -495,19 +494,11 @@ async function migrateLegacyLists(adminId) {
 ========================================================= */
 
 const waSessions = new Map();
-let baileysVersionPromise = null;
 
-async function getBaileysVersionCached() {
-  if (!baileysVersionPromise) {
-    baileysVersionPromise = fetchLatestBaileysVersion()
-      .then((result) => result?.version)
-      .catch((error) => {
-        console.warn('[wa] Could not fetch latest WhatsApp Web version; using Baileys default:', error.message);
-        return undefined;
-      });
-  }
-  return baileysVersionPromise;
-}
+// Do not block QR generation on a network request to discover the latest
+// WhatsApp Web version. Baileys ships a default version and can start the
+// socket immediately; a slow/unavailable version endpoint previously delayed
+// every first connection attempt before a QR could even be emitted.
 
 async function hasSavedWAAuth(userId) {
   const d = await getDb();
@@ -949,9 +940,9 @@ async function startWA(userId) {
       } catch {}
     }
 
-    const version = await getBaileysVersionCached();
     const currentSocket = makeWASocket({
-      ...(version ? { version } : {}),
+      // Let Baileys use its bundled default version so QR generation starts
+      // immediately instead of waiting for an external version lookup.
       auth: auth.state,
       logger: pino({ level: 'silent' }),
       browser: ['Whatsapp Group Manager', 'Chrome', '1.0']
