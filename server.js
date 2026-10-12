@@ -497,33 +497,24 @@ async function migrateLegacyLists(adminId) {
 const waSessions = new Map();
 let baileysVersionPromise = null;
 
-function getCachedBaileysVersion() {
+async function getBaileysVersionCached() {
   if (!baileysVersionPromise) {
-    baileysVersionPromise = (async () => {
-      let timeout;
-      try {
-        const latest = await Promise.race([
-          fetchLatestBaileysVersion().then((result) => result.version),
-          new Promise((resolve) => {
-            timeout = setTimeout(() => resolve(null), 5000);
-          })
-        ]);
-        // If the version endpoint is slow/unreachable, use the version bundled
-        // with the installed Baileys package rather than blocking QR startup.
-        return latest || [2, 3000, 1043857760];
-      } catch {
-        return [2, 3000, 1043857760];
-      } finally {
-        if (timeout) clearTimeout(timeout);
-      }
-    })();
+    baileysVersionPromise = fetchLatestBaileysVersion()
+      .then((result) => result?.version)
+      .catch((error) => {
+        console.warn('[wa] Could not fetch latest WhatsApp Web version; using Baileys default:', error.message);
+        return undefined;
+      });
   }
   return baileysVersionPromise;
 }
 
-function isInvalidWhatsAppAuthCode(code) {
-  return code === DisconnectReason.loggedOut || code === DisconnectReason.badSession ||
-    code === DisconnectReason.forbidden || code === DisconnectReason.multideviceMismatch;
+async function hasSavedWAAuth(userId) {
+  const d = await getDb();
+  if (d) {
+    return Boolean(await d.collection('auth').findOne({ ownerId: String(userId), _id: `${String(userId)}::creds` }, { projection: { _id: 1 } }));
+  }
+  return fs.existsSync(`${userAuthPath(userId)}/creds.json`);
 }
 
 function userAuthPath(userId) {
@@ -540,9 +531,7 @@ function createWAContext(userId) {
     startPromise: null,
     manualStop: false,
     reconnectTimer: null,
-    connectionTimer: null,
     reconnectDelay: 2000,
-    lastError: null,
     groupCache: { at: 0, data: null },
     codeCache: new Map(),
     codeInflight: new Map(),
@@ -774,13 +763,6 @@ function clearReconnectTimer(wa) {
   }
 }
 
-function clearWAConnectionTimer(wa) {
-  if (wa.connectionTimer) {
-    clearTimeout(wa.connectionTimer);
-    wa.connectionTimer = null;
-  }
-}
-
 function scheduleWAReconnect(wa) {
   if (wa.manualStop || wa.state === 'closed' || wa.reconnectTimer || wa.startPromise) return;
   const delay = wa.reconnectDelay;
@@ -815,7 +797,6 @@ async function disposeWA(userId, clearAuthState = true) {
   }
 
   clearReconnectTimer(wa);
-  clearWAConnectionTimer(wa);
   const current = wa.sock;
   wa.sock = null;
   wa.state = 'closed';
@@ -968,41 +949,16 @@ async function startWA(userId) {
       } catch {}
     }
 
-    // Reuse the Baileys version lookup across user logins.
-    const version = await getCachedBaileysVersion();
+    const version = await getBaileysVersionCached();
     const currentSocket = makeWASocket({
-      version,
+      ...(version ? { version } : {}),
       auth: auth.state,
       logger: pino({ level: 'silent' }),
       browser: ['Whatsapp Group Manager', 'Chrome', '1.0']
     });
 
     wa.sock = currentSocket;
-    wa.lastError = null;
     currentSocket.ev.on('creds.update', auth.saveCreds);
-
-    // Avoid an endless spinner if an old registered session never completes
-    // its handshake and never emits a QR or close event.
-    clearWAConnectionTimer(wa);
-    if (auth.state.creds?.registered) {
-      wa.connectionTimer = setTimeout(async () => {
-        if (wa.sock !== currentSocket || wa.state === 'connected' ||
-            wa.state === 'qr' || wa.manualStop) return;
-        console.warn(`[wa:${wa.userId}] Existing session handshake timed out; resetting stale auth.`);
-        wa.lastError = 'The previous WhatsApp session could not reconnect. A fresh QR is being prepared.';
-        wa.sock = null;
-        wa.state = 'starting';
-        wa.qrDataUrl = null;
-        try { currentSocket.end(new Error('WhatsApp session handshake timed out')); } catch {}
-        await clearWAAuth(wa).catch((e) => console.error(`[wa:${wa.userId}] stale auth cleanup failed:`, e.message));
-        if (!wa.manualStop) {
-          setTimeout(() => startWA(wa.userId).catch((e) => {
-            wa.lastError = `Could not start a fresh WhatsApp session: ${e.message}`;
-            console.error(`[wa:${wa.userId}] fresh QR after timeout failed:`, e.message);
-          }), 250);
-        }
-      }, 30000);
-    }
 
     if (!wa.statsLoaded) {
       wa.statsLoaded = true;
@@ -1035,8 +991,6 @@ async function startWA(userId) {
       }
 
       if (connection === 'open') {
-        clearWAConnectionTimer(wa);
-        wa.lastError = null;
         wa.state = 'connected';
         wa.qrDataUrl = null;
         wa.reconnectDelay = 2000;
@@ -1048,29 +1002,26 @@ async function startWA(userId) {
       }
 
       if (connection === 'close') {
-        clearWAConnectionTimer(wa);
         if (wa.sock === currentSocket) wa.sock = null;
         wa.groupCache = { at: 0, data: null };
         wa.codeCache.clear();
         const code = lastDisconnect?.error?.output?.statusCode;
-        const disconnectMessage = lastDisconnect?.error?.message || 'WhatsApp connection closed';
 
-        if (isInvalidWhatsAppAuthCode(code)) {
-          wa.state = wa.manualStop ? 'idle' : 'starting';
+        if (code === DisconnectReason.loggedOut) {
+          // WhatsApp explicitly invalidated this login. This is the only
+          // automatic disconnect path that clears saved credentials.
+          wa.state = wa.manualStop ? 'idle' : 'closed';
           wa.qrDataUrl = null;
-          wa.lastError = `The previous WhatsApp session is no longer valid (${code}). Preparing a new QR code.`;
-          await clearWAAuth(wa).catch((e) => console.error(`[wa:${wa.userId}] auth cleanup failed:`, e.message));
+          await clearWAAuth(wa);
           wa.reconnectDelay = 2000;
           if (!wa.manualStop) {
-            setTimeout(() => startWA(wa.userId).catch((e) => {
-              wa.lastError = `Could not start a fresh WhatsApp session: ${e.message}`;
-              console.error(`[wa:${wa.userId}] fresh QR start:`, e.message);
-            }), 250);
+            startWA(wa.userId).catch((e) => console.error(`[wa:${wa.userId}] fresh QR start:`, e.message));
           }
         } else {
+          // Network drops, restarts, timeouts and transient server errors must
+          // never destroy a valid session. Reconnect using the same auth state.
           wa.state = wa.manualStop ? 'idle' : 'starting';
           wa.qrDataUrl = null;
-          wa.lastError = wa.manualStop ? null : disconnectMessage;
           if (!wa.manualStop) scheduleWAReconnect(wa);
         }
       }
@@ -1080,9 +1031,7 @@ async function startWA(userId) {
   try {
     return await wa.startPromise;
   } catch (e) {
-    clearWAConnectionTimer(wa);
     wa.state = 'starting';
-    wa.lastError = e?.message || 'WhatsApp could not start';
     wa.sock = null;
     scheduleWAReconnect(wa);
     throw e;
@@ -1453,13 +1402,26 @@ app.get('/api/status', requireAuth, async (req, res) => {
   });
 
   const wa = getWA(req.user.userId);
+  // Restore an existing persisted session after app restart or profile logout/login.
+  // Do not start a blank session here: users without auth should explicitly request a QR.
+  if (wa.state === 'idle' && !wa.sock && !wa.startPromise && !wa.manualStop) {
+    try {
+      if (await hasSavedWAAuth(wa.userId)) {
+        startWA(wa.userId).catch((e) => console.error(`[wa:${wa.userId}] session restore failed:`, e.message));
+      }
+    } catch (e) {
+      console.error(`[wa:${wa.userId}] saved session check failed:`, e.message);
+    }
+  }
   const connected = wa.state === 'connected' && !!wa.sock;
 
+  let hasSavedSession = false;
+  try { hasSavedSession = await hasSavedWAAuth(wa.userId); } catch {}
   res.json({
     state: wa.state,
     connected,
+    hasSavedSession,
     qr: wa.qrDataUrl,
-    error: wa.lastError,
     canDisconnect: wa.state !== 'idle',
     owner: req.user.userId,
     checkedAt: Date.now()
@@ -1479,14 +1441,12 @@ app.post('/api/start-wa', requireAuth, async (req, res) => {
 
     if (refresh) {
       clearReconnectTimer(wa);
-      clearWAConnectionTimer(wa);
       wa.manualStop = true;
 
       const current = wa.sock;
       wa.sock = null;
       wa.qrDataUrl = null;
       wa.state = 'idle';
-      wa.lastError = null;
 
       if (current) {
         try { current.end(undefined); } catch {}
@@ -1502,8 +1462,7 @@ app.post('/api/start-wa', requireAuth, async (req, res) => {
   } catch (e) {
     wa.state = 'idle';
     wa.qrDataUrl = null;
-    wa.lastError = 'Could not start WhatsApp: ' + e.message;
-    res.status(500).json({ error: wa.lastError });
+    res.status(500).json({ error: 'Could not start WhatsApp: ' + e.message });
   }
 });
 
